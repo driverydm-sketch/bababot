@@ -67,11 +67,21 @@ async function calculateAndPayout(gameId, actualWinner, actualScore, actualScore
 
 // פקודת סטארט ראשית
 bot.start(async (ctx) => {
+  // פקודת ניהול ייעודית לפתיחת פאנל המנהל
+bot.command('admin', async (ctx) => {
     try {
-        const userId = ctx.from.id;
-        const username = ctx.from.username || ctx.from.first_name || 'משתמש';
+        if (!isAdmin(ctx.from.id)) {
+            return ctx.reply("❌ פקודה זו מיועדת למנהלי המערכת בלבד.");
+        }
         
-        // הגנה מפני קריסה אם ה-Table של המשתמשים לא מגיב זמנית
+        return ctx.reply("🛠️ *פאנל ניהול אדמין:*", Markup.inlineKeyboard([
+            [Markup.button.callback('📊 סטטיסטיקה', 'admin_stats')],
+            [Markup.button.callback('👥 רשימת משתמשים', 'admin_users')]
+        ]));
+    } catch (err) {
+        console.error("Error in admin command:", err);
+    }
+});        // הגנה מפני קריסה אם ה-Table של המשתמשים לא מגיב זמנית
         try {
             const { data: existingUser } = await supabase.from('users').select('*').eq('telegram_id', userId).single();
             if (!existingUser) { 
