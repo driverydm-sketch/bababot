@@ -129,4 +129,102 @@ bot.action('check_balance', async (ctx) => {
 //      האזנה לכפתורי אדמין (CALLBACKS)
 // ==========================================
 
-bot
+bot.action('admin_stats', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery("❌ אין לך הרשאה");
+    try {
+        const { data: games } = await supabase.from('games').select('house_profit').eq('status', 'finished');
+        const totalProfit = games ? games.reduce((sum, game) => sum + (game.house_profit || 0), 0) : 0;
+        await ctx.reply(`📊 **סטטיסטיקת רווחים:**\nסך רווחי הבית שנצברו: ${totalProfit.toFixed(2)} ש"ח.`);
+        await ctx.answerCbQuery();
+    } catch (err) {
+        await ctx.answerCbQuery();
+    }
+});
+
+bot.action('admin_list_users', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery("❌ אין לך הרשאה");
+    try {
+        const { data: users } = await supabase.from('users').select('username, balance');
+        if (!users || users.length === 0) {
+            await ctx.reply("אין משתמשים רשומים.");
+            return await ctx.answerCbQuery();
+        }
+        
+        let msg = "👥 **רשימת משתמשים במערכת:**\n\n";
+        users.forEach(u => {
+            msg += `👤 @${u.username || 'ללא שם'} | 💰 יתרה: ${u.balance || 0} ש"ח\n`;
+        });
+        await ctx.reply(msg);
+        await ctx.answerCbQuery();
+    } catch (err) {
+        await ctx.answerCbQuery();
+    }
+});
+
+// ==========================================
+//             פקודות טקסט (COMMANDS)
+// ==========================================
+
+bot.command('profit', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const { data: games } = await supabase.from('games').select('house_profit').eq('status', 'finished');
+    const totalProfit = games ? games.reduce((sum, game) => sum + (game.house_profit || 0), 0) : 0;
+    ctx.reply(`📊 סך רווחי הבית שנצברו: ${totalProfit} ש"ח.`);
+});
+
+bot.command('bet', async (ctx) => {
+    const args = ctx.message.text.split(' ');
+    if (args.length < 5) return ctx.reply("שימוש: /bet [ID] [מנצחת] [תוצאה] [כובש]");
+    await supabase.from('bets').insert([{ user_id: ctx.from.id, game_id: args[1], winner: args[2], score: args[3], scorer: args[4] }]);
+    ctx.reply("✅ ההימור נרשם!");
+});
+
+bot.command('addgame', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const args = ctx.message.text.split(' ');
+    if (args.length < 4) return ctx.reply("שימוש: /addgame [קבוצת_בית] [קבוצת_חוץ] [fixture_id]");
+    await supabase.from('games').insert([{ home_team: args[1], away_team: args[2], fixture_id: args[3], status: 'active' }]);
+    ctx.reply("✅ המשחק נוסף בהצלחה.");
+});
+
+bot.command('admin', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) {
+        return ctx.reply("❌ אין לך הרשאת אדמין.");
+    }
+
+    const adminMessage = `🛠 **פאנל ניהול אדמין**\n\n` +
+      ` 💡 פורמט הוספת משחק:\n /addgame [קבוצה 1] [קבוצה 2] [Fixture_ID]\n\n` +
+      ` 💡 כדי לסיים משחק ידנית (אם צריך):\n /endgame [ID] [תוצאה 1X2]`;
+      
+    await ctx.replyWithMarkdown(adminMessage, Markup.inlineKeyboard([
+        [Markup.button.callback('📊 סטטיסטיקה', 'admin_stats')],
+        [Markup.button.callback('👥 רשימת משתמשים', 'admin_list_users')]
+    ]));
+});
+
+async function checkAndFinishGames() {
+    const { data: activeGames } = await supabase.from('games').select('*').eq('status', 'active');
+    if (!activeGames) return;
+
+    for (const game of activeGames) {
+        try {
+            const response = await axios.get(`https://v3.football.api-sports.io/fixtures?id=${game.fixture_id}`, {
+                headers: { 'x-apisports-key': FOOTBALL_API_KEY }
+            });
+            const match = response.data.response[0];
+            if (match && match.fixture.status.short === 'FT') {
+                const home = match.score.fulltime.home, away = match.score.fulltime.away;
+                const winner = home > away ? 'בית' : (away > home ? 'חוץ' : 'תיקו');
+                const scorer = await getFirstScorer(game.fixture_id);
+                
+                await calculateAndPayout(game.id, winner, `${home}-${away}`, scorer);
+                await supabase.from('games').update({ status: 'finished' }).eq('id', game.id);
+            }
+        } catch (err) { console.error(err); }
+    }
+}
+
+cron.schedule('*/30 * * * *', checkAndFinishGames);
+http.createServer((req, res) => res.end("Bot is running!")).listen(process.env.PORT || 3000);
+bot.launch();
+console.log('🚀 BOT RUNNING WITH CALLBACK HANDLERS');
