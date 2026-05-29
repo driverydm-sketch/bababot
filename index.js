@@ -2,7 +2,6 @@ const { Telegraf, Markup } = require('telegraf');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
-// 1. חיבור ל-Supabase וטעינת משתני סביבה
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 const botToken = process.env.BOT_TOKEN;
@@ -16,99 +15,127 @@ if (!supabaseUrl || !supabaseKey || !botToken) {
 const supabase = createClient(supabaseUrl, supabaseKey);
 const bot = new Telegraf(botToken);
 
-// פונקציית עזר לבדיקת אדמין
 const isAdmin = (userId) => parseInt(userId) === adminId;
 
-// ==========================================
-// פונקציות עזר וחישובי קופות (Core Logic)
-// ==========================================
-
+// פונקציית חלוקת כספים
 async function calculateAndPayout(gameId, actualWinner, actualScore, actualScorer) {
-    console.log(`🎬 מתחיל חישוב חלוקת קופה למשחק מספר: ${gameId}`);
-    
-    // 1. משיכת כל ההימורים של המשחק הספציפי
-    const { data: bets, error: betsError } = await supabase
-        .from('bets')
-        .select('*')
-        .eq('game_id', gameId);
-        
-    if (betsError) throw betsError;
-    if (!bets || bets.length === 0) {
-        console.log("🤷‍♂️ לא נמצאו הימורים למשחק זה.");
-        return;
-    }
+    const { data: bets } = await supabase.from('bets').select('*').eq('game_id', gameId);
+    if (!bets || bets.length === 0) return;
 
-    const totalPot = bets.length * 100; // 100 ש"ח כניסה לכל שחקן
-    const houseCommission = totalPot * 0.20; // 20% עמלת בית
+    const totalPot = bets.length * 100;
+    const houseCommission = totalPot * 0.20;
     const netPot = totalPot - houseCommission;
 
-    // 2. עדכון רווחי האדמין/הבית בדאטה-בייס
     const { data: currentAdmin } = await supabase.from('users').select('balance').eq('telegram_id', adminId).single();
-    const newAdminBalance = (currentAdmin?.balance || 0) + houseCommission;
-    await supabase.from('users').update({ balance: newAdminBalance }).eq('telegram_id', adminId);
+    await supabase.from('users').update({ balance: (currentAdmin?.balance || 0) + houseCommission }).eq('telegram_id', adminId);
 
-    // 3. סינון המנצחים לפי הקטגוריות
     const winnerBets = bets.filter(b => b.predicted_winner === actualWinner);
     const scoreBets = bets.filter(b => b.predicted_score === actualScore);
     const scorerBets = bets.filter(b => b.predicted_scorer?.toLowerCase() === actualScorer?.toLowerCase());
 
-    // 4. חישוב שווי כל קופה יחסית (40% מנצחת, 40% תוצאה, 20% כובש)
-    const winnerPotShare = netPot * 0.40;
-    const scorePotShare = netPot * 0.40;
-    const scorerPotShare = netPot * 0.20;
+    const payoutPerWinner = winnerBets.length > 0 ? (netPot * 0.40) / winnerBets.length : 0;
+    const payoutPerScore = scoreBets.length > 0 ? (netPot * 0.40) / scoreBets.length : 0;
+    const payoutPerScorer = scorerBets.length > 0 ? (netPot * 0.20) / scorerBets.length : 0;
 
-    const payoutPerWinner = winnerBets.length > 0 ? winnerPotShare / winnerBets.length : 0;
-    const payoutPerScore = scoreBets.length > 0 ? scorePotShare / scoreBets.length : 0;
-    const payoutPerScorer = scorerBets.length > 0 ? scorerPotShare / scorerBets.length : 0;
-
-    // 5. חלוקת הכספים למשתמשים ושליחת הודעות
-    const userPayouts = {};
-
-    bets.forEach(bet => {
+    for (const bet of bets) {
         let userTotal = 0;
-        let details = [];
-
-        if (bet.predicted_winner === actualWinner && payoutPerWinner > 0) {
-            userTotal += payoutPerWinner;
-            details.push(`ניחשת נכון את המנצחת (+${payoutPerWinner.toFixed(2)} ש"ח)`);
-        }
-        if (bet.predicted_score === actualScore && payoutPerScore > 0) {
-            userTotal += payoutPerScore;
-            details.push(`ניחשת נכון את התוצאה המדויקת (+${payoutPerScore.toFixed(2)} ש"ח)`);
-        }
-        if (bet.predicted_scorer?.toLowerCase() === actualScorer?.toLowerCase() && payoutPerScorer > 0) {
-            userTotal += payoutPerScorer;
-            details.push(`ניחשת נכון את הכובש הראשון (+${payoutPerScorer.toFixed(2)} ש"ח)`);
-        }
+        if (bet.predicted_winner === actualWinner) userTotal += payoutPerWinner;
+        if (bet.predicted_score === actualScore) userTotal += payoutPerScore;
+        if (bet.predicted_scorer?.toLowerCase() === actualScorer?.toLowerCase()) userTotal += payoutPerScorer;
 
         if (userTotal > 0) {
-            userPayouts[bet.telegram_id] = {
-                amount: userTotal,
-                msg: `🎯 *מזל טוב! פגעת בהימורים על המשחק!*\n\n${details.join('\n')}\n\n💰 סה"כ זכייה: *${userTotal.toFixed(2)} ש"ח* הועברו ליתרה שלך.`
-            };
-        }
-    });
-
-    // 6. עדכון היתרות ב-Supabase ושליחת ההודעות בפועל ליוזרים
-    for (const [userId, payout] of Object.entries(userPayouts)) {
-        const { data: user } = await supabase.from('users').select('balance').eq('telegram_id', userId).single();
-        const newBalance = (user?.balance || 0) + payout.amount;
-        
-        await supabase.from('users').update({ balance: newBalance }).eq('telegram_id', userId);
-        
-        // שליחת הודעה פרטית מהבוט לזוכה
-        try {
-            await bot.telegram.sendMessage(userId, payout.msg, { parse_mode: 'Markdown' });
-        } catch (e) {
-            console.error(`⚠️ לא ניתן לשלוח הודעה ליוזר ${userId}:`, e.message);
+            const { data: user } = await supabase.from('users').select('balance').eq('telegram_id', bet.telegram_id).single();
+            await supabase.from('users').update({ balance: (user?.balance || 0) + userTotal }).eq('telegram_id', bet.telegram_id);
+            try { await bot.telegram.sendMessage(bet.telegram_id, `🎯 זכייה של ${userTotal.toFixed(2)} ש"ח!`); } catch (e) {}
         }
     }
 }
 
-// ==========================================
-// פקודות בוט בסיסיות (Core Commands)
-// ==========================================
-
-// פקודת ההתחלה /start
 bot.start(async (ctx) => {
-    const userId = ctx.from.
+    const userId = ctx.from.id;
+    const username = ctx.from.username || ctx.from.first_name || 'משתמש';
+    
+    try {
+        const { data: existingUser } = await supabase.from('users').select('*').eq('telegram_id', userId).single();
+        if (!existingUser) { 
+            await supabase.from('users').insert([{ telegram_id: userId, username: username, balance: 0.0 }]); 
+        }
+    } catch (e) { console.error(e); }
+
+    return ctx.reply("🔥 ברוכים הבאים לבאבאבוט!\nהגעתם לזירת ניחושי הספורט החכמה בישראל.", Markup.inlineKeyboard([
+        [Markup.button.callback('🎮 משחקים פתוחים', 'list_games'), Markup.button.callback('💰 יתרה', 'check_balance')]
+    ]));
+});
+
+bot.command('bet', async (ctx) => {
+    const args = ctx.message.text.split(' ');
+    if (args.length < 5) return ctx.reply("❌ פורמט: /bet [ID] [בית/חוץ/תיקו] [תוצאה] [כובש]");
+    const userId = ctx.from.id, gameId = args[1], winner = args[2], score = args[3], scorer = args[4];
+
+    try {
+        const { data: user } = await supabase.from('users').select('balance').eq('telegram_id', userId).single();
+        if (!user || user.balance < 100) return ctx.reply("❌ יתרה נמוכה מ-100 ש\"ח.");
+
+        await supabase.from('users').update({ balance: user.balance - 100 }).eq('telegram_id', userId);
+        await supabase.from('bets').insert([{ telegram_id: userId, game_id: gameId, predicted_winner: winner, predicted_score: score, predicted_scorer: scorer }]);
+        ctx.reply("✅ ההימור נקלט בהצלחה!");
+    } catch (err) { console.error(err); ctx.reply("❌ שגיאה בקליטת ההימור."); }
+});
+
+bot.command('addgame', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const args = ctx.message.text.split(' ');
+    if (args.length < 4) return ctx.reply("❌ פורמט: /addgame [קבוצה1] [קבוצה2] [ID]");
+    
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 7);
+    
+    try {
+        await supabase.from('games').insert([{ home_team: args[1], away_team: args[2], fixture_id: parseInt(args[3]), status: 'active', kickoff: futureDate.toISOString() }]);
+        ctx.reply("✅ המשחק נוסף בהצלחה ופתוח להימורים!");
+    } catch (err) { console.error(err); ctx.reply("❌ שגיאה בהוספת המשחק."); }
+});
+
+bot.command('endgame', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const args = ctx.message.text.split(' ');
+    if (args.length < 5) return ctx.reply("❌ פורמט: /endgame [ID] [בית/חוץ/תיקו] [תוצאה] [כובש]");
+    
+    try {
+        await calculateAndPayout(args[1], args[2], args[3], args[4]);
+        await supabase.from('games').update({ status: 'finished' }).eq('id', args[1]);
+        ctx.reply(`✅ משחק ${args[1]} נסגר בהצלחה והכספים חולקו!`);
+    } catch (err) { console.error(err); ctx.reply("❌ שגיאה בסגירת המשחק."); }
+});
+
+bot.on('callback_query', async (ctx) => {
+    try {
+        if (ctx.data === 'list_games') {
+            const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
+            if (!games || games.length === 0) {
+                await ctx.reply("⚽ אין משחקים פתוחים להימורים כרגע.");
+            } else {
+                let res = "🎮 *משחקים פתוחים להימורים:*\n\n";
+                games.forEach(g => res += `• 🆔 ID: \`${g.id}\` | *${g.home_team}* נגד *${g.away_team}*\n📝 שלח: \`/bet ${g.id} [בית/חוץ/תיקו] [תוצאה] [כובש]\`\n\n`);
+                await ctx.reply(res, { parse_mode: 'Markdown' });
+            }
+        } else if (ctx.data === 'check_balance') {
+            const { data: user } = await supabase.from('users').select('balance').eq('telegram_id', ctx.from.id).single();
+            await ctx.reply(`💰 *היתרה הנוכחית שלך:* **${user?.balance || 0} ש"ח**.`);
+        }
+        await ctx.answerCbQuery().catch(() => {});
+    } catch (err) { 
+        console.error(err); 
+        try { await ctx.answerCbQuery().catch(() => {}); } catch(e) {} 
+    }
+});
+
+// הפעלה מפורשת שמחזיקה את התהליך פתוח
+bot.launch().then(() => {
+    console.log("🚀 BOT RUNNING WITH CALLBACK HANDLERS");
+}).catch((err) => {
+    console.error("❌ הבוט נכשל בעלייה:", err);
+});
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
