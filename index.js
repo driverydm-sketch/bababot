@@ -124,4 +124,11 @@ bot.on('text', async (ctx) => {
 const app = express();
 app.get('/', (req, res) => res.send('Live'));
 app.listen(process.env.PORT || 3000);
-bot.launch();
+// מחק את bot.launch() והוסף את זה במקום:
+const port = process.env.PORT || 3000;
+bot.telegram.setWebhook(`${process.env.URL}/webhook`);
+app.use(bot.webhookCallback('/webhook'));
+
+app.listen(port, () => {
+    console.log(`Bot is running on port ${port}`);
+});
