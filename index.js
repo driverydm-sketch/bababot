@@ -27,6 +27,24 @@ bot.command('admin', (ctx) => {
 bot.command('addgame', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return ctx.reply("❌ מורשה למנהלים בלבד.");
     
+    const parts = ctx.message.text.split(/\s+/);
+    if (parts.length < 4) return ctx.reply("❌ פורמט: /addgame [קבוצה_א] [קבוצה_ב] [ID]");
+    
+    try {
+        // שינינו את שמות השדות ל-team_a ו-team_b כדי להתאים לטבלה שלך
+        const { error } = await supabase.from('games').insert([{ 
+            team_a: parts[1], 
+            team_b: parts[2], 
+            id: parseInt(parts[3]) // שים לב: אם ה-ID הוא העמודה הראשית שלך, השתמש ב-id
+        }]);
+
+        if (error) throw error;
+        ctx.reply(`✅ המשחק ${parts[1]} נגד ${parts[2]} נוסף בהצלחה!`);
+    } catch (e) { 
+        console.error("Supabase Error:", e);
+        ctx.reply("❌ שגיאה בשמירת המשחק למסד הנתונים."); 
+    }
+});
     // חילוץ המידע עם ביטוי רגולרי (regex) שמתעלם מרווחים כפולים
     const text = ctx.message.text;
     const parts = text.split(/\s+/);
