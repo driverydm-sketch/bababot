@@ -86,17 +86,77 @@ bot.on('callback_query', async (ctx) => {
             const { data: bets } = await supabase.from('bets').select('*').eq('game_id', gameId);
             const total = (bets.length * 100);
             ctx.reply(`📊 *מצב קופה לייב*\nסך הכל בקופה: ${total} ש"ח\n${game.team_a} vs ${game.team_b}\nדקה: ${game.live_minute}\nתוצאה: ${game.live_score}`, { parse_mode: 'Markdown' });
-        } else if (data.startsWith('b1_')) {
-            userSessions[userId] = { gameId: parseInt(data.replace('b1_', '')), step: 'AWAITING_WINNER' };
-            ctx.reply("👑 מי המנצחת?", Markup.inlineKeyboard([[Markup.button.callback('1', 'b2_1'), Markup.button.callback('X', 'b2_X'), Markup.button.callback('2', 'b2_2')]]));
-        } else if (data.startsWith('b2_')) {
-            const betType = data.replace('b2_', '');
-            const session = userSessions[userId];
-            if (session && session.step === 'AWAITING_WINNER') {
-                await supabase.from('bets').insert({ user_id: userId, game_id: session.gameId, bet: betType });
-                ctx.reply(`✅ ההימור שלך על ${betType} נקלט בהצלחה!`);
-                delete userSessions[userId];
+        else if (data.startsWith('b1_')) {
+            const gameId = parseInt(data.replace('b1_', ''));
+
+            const { data: existingBet } = await supabase.from('bets').select('*').eq('telegram_id', userId).eq('game_id', gameId).single();
+            if (existingBet) {
+                return ctx.reply("❌ כבר נרשמת למשחק זה. לא ניתן להמר פעמיים.");
             }
+
+            const { data: user } = await supabase.from('users').select('balance').eq('telegram_id', userId).single();
+            if (!user || user.balance < 100) {
+                return ctx.reply(`❌ אין לך מספיק יתרה בקופה. עלות כניסה: 100 ש"ח.\nיתרה: ${user?.balance || 0} ש"ח.`);
+            }
+
+            userSessions[userId] = { gameId: gameId, step: 'AWAITING_WINNER' };
+
+            ctx.reply(`שלב 1/4: מי המנצחת? 👑`, Markup.inlineKeyboard([
+                [Markup.button.callback('1 (בית)', `b2_1`), Markup.button.callback('X (תיקו)', `b2_X`), Markup.button.callback('2 (חוץ)', `b2_2`)]
+            ]));
+        }
+
+        // שלב 2: בחירת שערים א'
+        else if (data.startsWith('b2_')) {
+            if (!userSessions[userId] || userSessions[userId].step !== 'AWAITING_WINNER') return ctx.reply("הסשן פג תוקף.");
+            userSessions[userId].winner = data.replace('b2_', '');
+            userSessions[userId].step = 'AWAITING_GOALS_A';
+
+            ctx.reply(`שלב 2/4 (חלק א'): כמה שערים תבקיע קבוצת הבית? ⚽`, Markup.inlineKeyboard([
+                [Markup.button.callback('0', `b3a_0`), Markup.button.callback('1', `b3a_1`), Markup.button.callback('2', `b3a_2`)],
+                [Markup.button.callback('3', `b3a_3`), Markup.button.callback('4', `b3a_4`), Markup.button.callback('5', `b3a_5`)]
+            ]));
+        }
+
+        // שלב 3: בחירת שערים ב'
+        else if (data.startsWith('b3a_')) {
+            if (!userSessions[userId] || userSessions[userId].step !== 'AWAITING_GOALS_A') return ctx.reply("הסשן פג תוקף.");
+            userSessions[userId].goalsA = data.replace('b3a_', '');
+            userSessions[userId].step = 'AWAITING_GOALS_B';
+
+            ctx.reply(`שלב 2/4 (חלק ב'): כמה שערים תבקיע קבוצת החוץ? ⚽`, Markup.inlineKeyboard([
+                [Markup.button.callback('0', `b3b_0`), Markup.button.callback('1', `b3b_1`), Markup.button.callback('2', `b3b_2`)],
+                [Markup.button.callback('3', `b3b_3`), Markup.button.callback('4', `b3b_4`), Markup.button.callback('5', `b3b_5`)]
+            ]));
+        }
+
+        // שלב 4: הכנה לטקסט חופשי (כובש)
+        else if (data.startsWith('b3b_')) {
+            if (!userSessions[userId] || userSessions[userId].step !== 'AWAITING_GOALS_B') return ctx.reply("הסשן פג תוקף.");
+            const goalsB = data.replace('b3b_', '');
+            const finalScore = `${userSessions[userId].goalsA}-${goalsB}`;
+            
+            userSessions[userId].score = finalScore;
+            userSessions[userId].step = 'AWAITING_SCORER';
+
+            ctx.reply(`נבחרה תוצאה: ${finalScore} 🎯\n\nשלב 3/4: הימור פתוח! 🏃\nהקלד עכשיו בצ'אט את שם השחקן שיבקיע את הגול הראשון:`);
+        }
+
+        else if (data === 'check_balance') {
+            const { data: user } = await supabase.from('users').select('balance').eq('telegram_id', userId).single();
+            ctx.reply(`💰 היתרה שלך היא: ${user?.balance || 0} ש"ח`);
+        }
+
+    } catch (e) { console.error(e); }
+    await ctx.answerCbQuery();
+});
+
+// קשב להודעות טקסט
+bot.on('text', async (ctx) => {
+    const userId = ctx.from.id;
+    const session = userSessions[userId];
+
+    if (!session) return;   }
         }
     } catch (e) { console.error(e); }
     await ctx.answerCbQuery();
