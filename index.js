@@ -5,7 +5,7 @@ const express = require('express');
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 const adminId = parseInt(process.env.ADMIN_ID);
-
+bot.launch().then(() => console.log('Bot is running in polling mode!'));
 const isAdmin = (id) => parseInt(id) === adminId;
 const userSessions = {};
 
