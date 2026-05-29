@@ -52,15 +52,6 @@ bot.start(async (ctx) => {
     });
 });
 
-bot.command('admin', (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    ctx.reply("🛠️ פאנל ניהול:", Markup.inlineKeyboard([
-        [Markup.button.callback('👥 ניהול משתמשים', 'admin_users')],
-        [Markup.button.callback('⚽ עדכון משחק חי', 'admin_live_games')],
-        [Markup.button.callback('📢 מערכת שידורים', 'admin_broadcast_menu')]
-    ]));
-});
-
 bot.on('callback_query', async (ctx) => {
     const data = ctx.callbackQuery.data;
     const userId = ctx.from.id;
@@ -73,18 +64,6 @@ bot.on('callback_query', async (ctx) => {
         } else if (data.startsWith('adm_dep_')) {
             userSessions[userId] = { targetId: parseInt(data.replace('adm_dep_', '')), step: 'ADMIN_AWAITING_DEPOSIT' };
             ctx.reply("💸 שלח את סכום ההפקדה:");
-        } else if (data === 'admin_broadcast_menu') {
-            ctx.reply("📢 בחר זמן שידור:", Markup.inlineKeyboard([
-                [Markup.button.callback('24 שעות', 'bc_24h'), Markup.button.callback('12 שעות', 'bc_12h')],
-                [Markup.button.callback('3 שעות', 'bc_3h'), Markup.button.callback('שעה', 'bc_1h')],
-                [Markup.button.callback('חצי שעה', 'bc_30m')]
-            ]));
-        } else if (data.startsWith('bc_')) {
-            const time = data.replace('bc_', '').replace('h', ' שעות').replace('m', ' דקות');
-            const message = `⚽ תזכורת: המשחק קרוב! נותרו עוד ${time} לשריקת הפתיחה. אל תחכו לרגע האחרון – שלחו טופס עכשיו! 🏃💨`;
-            const { data: users } = await supabase.from('users').select('telegram_id');
-            for (const u of users) bot.telegram.sendMessage(u.telegram_id, message).catch(() => {});
-            ctx.reply("✅ השידור נשלח לכולם!");
         } else if (data === 'admin_live_games') {
             const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
             ctx.reply("⚽ בחר משחק לעדכון:", Markup.inlineKeyboard(games.map(g => [Markup.button.callback(`${g.team_a} vs ${g.team_b}`, `adm_live_set_${g.id}`)])));
@@ -111,6 +90,14 @@ bot.on('callback_query', async (ctx) => {
         } else if (data.startsWith('b1_')) {
             userSessions[userId] = { gameId: parseInt(data.replace('b1_', '')), step: 'AWAITING_WINNER' };
             ctx.reply("👑 מי המנצחת?", Markup.inlineKeyboard([[Markup.button.callback('1', 'b2_1'), Markup.button.callback('X', 'b2_X'), Markup.button.callback('2', 'b2_2')]]));
+        } else if (data.startsWith('b2_')) {
+            const betType = data.replace('b2_', '');
+            const session = userSessions[userId];
+            if (session && session.step === 'AWAITING_WINNER') {
+                await supabase.from('bets').insert({ user_id: userId, game_id: session.gameId, bet: betType });
+                ctx.reply(`✅ ההימור שלך על ${betType} נקלט בהצלחה!`);
+                delete userSessions[userId];
+            }
         }
     } catch (e) { console.error(e); }
     await ctx.answerCbQuery();
