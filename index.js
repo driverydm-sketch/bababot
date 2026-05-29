@@ -23,51 +23,32 @@ bot.command('admin', (ctx) => {
     ]));
 });
 
-// הפקודה המלאה והמתוקנת להוספת משחק
+// הפקודה המלאה והמתוקנת להוספת משחק - מותאמת ל-team_a ו-team_b
 bot.command('addgame', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return ctx.reply("❌ מורשה למנהלים בלבד.");
     
-    const parts = ctx.message.text.split(/\s+/);
-    if (parts.length < 4) return ctx.reply("❌ פורמט: /addgame [קבוצה_א] [קבוצה_ב] [ID]");
-    
-    try {
-        // שינינו את שמות השדות ל-team_a ו-team_b כדי להתאים לטבלה שלך
-        const { error } = await supabase.from('games').insert([{ 
-            team_a: parts[1], 
-            team_b: parts[2], 
-            id: parseInt(parts[3]) // שים לב: אם ה-ID הוא העמודה הראשית שלך, השתמש ב-id
-        }]);
-
-        if (error) throw error;
-        ctx.reply(`✅ המשחק ${parts[1]} נגד ${parts[2]} נוסף בהצלחה!`);
-    } catch (e) { 
-        console.error("Supabase Error:", e);
-        ctx.reply("❌ שגיאה בשמירת המשחק למסד הנתונים."); 
-    }
-});
-    // חילוץ המידע עם ביטוי רגולרי (regex) שמתעלם מרווחים כפולים
     const text = ctx.message.text;
     const parts = text.split(/\s+/);
     
     if (parts.length < 4) {
-        return ctx.reply("❌ פורמט לא תקין. השתמש ב: /addgame [בית] [חוץ] [ID]");
+        return ctx.reply("❌ פורמט לא תקין. השתמש ב: /addgame [קבוצה_א] [קבוצה_ב] [ID]");
     }
     
-    const homeTeam = parts[1];
-    const awayTeam = parts[2];
+    const teamA = parts[1];
+    const teamB = parts[2];
     const fixtureId = parseInt(parts[3]);
 
     try {
+        // הכנסה לפי השדות המדויקים ב-Supabase שלך
         const { error } = await supabase.from('games').insert([{ 
-            home_team: homeTeam, 
-            away_team: awayTeam, 
-            fixture_id: fixtureId, 
-            status: 'active' 
+            team_a: teamA, 
+            team_b: teamB, 
+            id: fixtureId // שימוש ב-id כיוון שזו העמודה שקיימת בטבלה
         }]);
 
         if (error) throw error;
         
-        ctx.reply(`✅ המשחק ${homeTeam} נגד ${awayTeam} (ID: ${fixtureId}) נוסף בהצלחה!`);
+        ctx.reply(`✅ המשחק ${teamA} נגד ${teamB} (ID: ${fixtureId}) נוסף בהצלחה!`);
     } catch (e) { 
         console.error("Supabase Error:", e);
         ctx.reply("❌ שגיאה בשמירת המשחק למסד הנתונים."); 
@@ -79,9 +60,9 @@ bot.on('callback_query', async (ctx) => {
     const data = ctx.callbackQuery.data;
     try {
         if (data === 'list_games') {
-            const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
+            const { data: games } = await supabase.from('games').select('*');
             let msg = games?.length ? "🎮 משחקים פתוחים:\n" : "אין משחקים כרגע.";
-            games?.forEach(g => msg += `• ${g.home_team} vs ${g.away_team} (ID: ${g.fixture_id})\n`);
+            games?.forEach(g => msg += `• ${g.team_a} vs ${g.team_b} (ID: ${g.id})\n`);
             ctx.reply(msg);
         } else if (data === 'check_balance') {
             const { data: user } = await supabase.from('users').select('balance').eq('telegram_id', ctx.from.id).single();
