@@ -9,7 +9,7 @@ const adminId = parseInt(process.env.ADMIN_ID);
 
 const isAdmin = (id) => parseInt(id) === adminId;
 
-// פקודת /start - הודעת פתיחה מלאה וכפתור לסוכן זמין
+// פקודת /start - הודעת פתיחה נקייה לחלוטין ללא תגיות Markdown בעייתיות
 bot.start((ctx) => {
     const welcomeMessage = "🔥 ברוכים הבאים לבאבאבוט! 🔥\n\n" +
                            "המקום המושלם לחוויית המשחק שלכם. 🎮\n" +
@@ -30,7 +30,7 @@ bot.command('admin', (ctx) => {
     ]));
 });
 
-// פקודה להוספת משחק - מותאמת ב-100% לטבלה שלך ב-Supabase
+// פקודה להוספת משחק - כולל טיפול ב-tournament_id
 bot.command('addgame', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return ctx.reply("❌ מורשה למנהלים בלבד.");
     
@@ -46,18 +46,20 @@ bot.command('addgame', async (ctx) => {
     const fixtureId = parseInt(parts[3]);
 
     try {
+        // מכניסים גם tournament_id ברירת מחדל (למשל 1), שנה אותו לפי הצורך של הטורניר שלך
         const { error } = await supabase.from('games').insert([{ 
+            id: fixtureId,
             team_a: teamA, 
             team_b: teamB, 
-            id: fixtureId
+            tournament_id: 1 
         }]);
 
         if (error) throw error;
         
         ctx.reply(`✅ המשחק ${teamA} נגד ${teamB} (ID: ${fixtureId}) נוסף בהצלחה!`);
     } catch (e) { 
-        console.error("Supabase Error:", e);
-        ctx.reply("❌ שגיאה בשמירת המשחק למסד הנתונים."); 
+        console.error("Supabase Error Details:", e);
+        ctx.reply(`❌ שגיאה בשמירת המשחק: ${e.message || 'בדוק עמודות חובה'}`); 
     }
 });
 
