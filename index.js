@@ -65,23 +65,13 @@ async function calculateAndPayout(gameId, actualWinner, actualScore, actualScore
     }
 }
 
-// פקודת סטארט ראשית
+// פקודת סטארט ראשית למשתמשים
 bot.start(async (ctx) => {
-  // פקודת ניהול ייעודית לפתיחת פאנל המנהל
-bot.command('admin', async (ctx) => {
     try {
-        if (!isAdmin(ctx.from.id)) {
-            return ctx.reply("❌ פקודה זו מיועדת למנהלי המערכת בלבד.");
-        }
+        const userId = ctx.from.id;
+        const username = ctx.from.username || ctx.from.first_name || 'משתמש';
         
-        return ctx.reply("🛠️ *פאנל ניהול אדמין:*", Markup.inlineKeyboard([
-            [Markup.button.callback('📊 סטטיסטיקה', 'admin_stats')],
-            [Markup.button.callback('👥 רשימת משתמשים', 'admin_users')]
-        ]));
-    } catch (err) {
-        console.error("Error in admin command:", err);
-    }
-});        // הגנה מפני קריסה אם ה-Table של המשתמשים לא מגיב זמנית
+        // הגנה מפני קריסה אם ה-Table של המשתמשים לא מגיב זמנית
         try {
             const { data: existingUser } = await supabase.from('users').select('*').eq('telegram_id', userId).single();
             if (!existingUser) { 
@@ -96,6 +86,22 @@ bot.command('admin', async (ctx) => {
         ]));
     } catch (err) {
         console.error("Error in start command:", err);
+    }
+});
+
+// פקודת אדמין ייעודית (מופרדת ומאובטחת)
+bot.command('admin', async (ctx) => {
+    try {
+        if (!isAdmin(ctx.from.id)) {
+            return ctx.reply("❌ פקודה זו מיועדת למנהלי המערכת בלבד.");
+        }
+        
+        return ctx.reply("🛠️ *פאנל ניהול אדמין:*", Markup.inlineKeyboard([
+            [Markup.button.callback('📊 סטטיסטיקה', 'admin_stats')],
+            [Markup.button.callback('👥 רשימת משתמשים', 'admin_users')]
+        ]));
+    } catch (err) {
+        console.error("Error in admin command:", err);
     }
 });
 
@@ -148,7 +154,7 @@ bot.command('checkapi', async (ctx) => {
         });
 
         const gameData = response.data.response[0];
-        if (!gameData) return ctx.reply("❌ לאמצאו נתונים עבור ה-ID הזה.");
+        if (!gameData) return ctx.reply("❌ לא נמצאו נתונים עבור ה-ID הזה.");
 
         const home = gameData.teams.home.name;
         const away = gameData.teams.away.name;
