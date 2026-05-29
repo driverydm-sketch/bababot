@@ -2,20 +2,27 @@ const { Telegraf, Markup } = require('telegraf');
 const { createClient } = require('@supabase/supabase-js');
 const express = require('express');
 
-// אתחול
+// אתחול הבוט וחיבור ל-Supabase
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 const adminId = parseInt(process.env.ADMIN_ID);
 
 const isAdmin = (id) => parseInt(id) === adminId;
 
-// פקודות בסיסיות
+// פקודת /start - הודעת פתיחה מלאה + כפתורים (כולל סוכן זמין)
 bot.start((ctx) => {
-    ctx.reply("🔥 ברוכים הבאים לבאבאבוט!", Markup.inlineKeyboard([
-        [Markup.button.callback('🎮 משחקים פתוחים', 'list_games'), Markup.button.callback('💰 יתרה', 'check_balance')]
+    const welcome = "🔥 *ברוכים הבאים לבאבאבוט!* 🔥\n\n" +
+                    "המקום המושלם לחוויית המשחק שלכם. 🎮\n" +
+                    "כאן תוכלו לצפות במשחקים פתוחים, לנהל את היתרה שלכם ולשחק בראש שקט.\n\n" +
+                    "📌 השתמשו בכפתורים למטה כדי להתחיל:";
+
+    ctx.replyWithMarkdown(welcome, Markup.inlineKeyboard([
+        [Markup.button.callback('🎮 משחקים פתוחים', 'list_games'), Markup.button.callback('💰 יתרה', 'check_balance')],
+        [Markup.button.url('👨‍💻 סוכן זמין 24/7', 'https://t.me/driverydm_sketch')] // כאן שמתי את היוזר מהלוגו שלך, שנה אם צריך
     ]));
 });
 
+// פאנל ניהול למנהל בלבד
 bot.command('admin', (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     ctx.reply("🛠️ פאנל ניהול:", Markup.inlineKeyboard([
@@ -23,31 +30,26 @@ bot.command('admin', (ctx) => {
     ]));
 });
 
-// הפקודה המלאה והמתוקנת להוספת משחק - מותאמת ל-team_a ו-team_b
+// הפקודה היציבה והמתוקנת להוספת משחק - מותאמת ב-100% לטבלה שלך
 bot.command('addgame', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return ctx.reply("❌ מורשה למנהלים בלבד.");
     
-    const text = ctx.message.text;
-    const parts = text.split(/\s+/);
-    
-    if (parts.length < 4) {
-        return ctx.reply("❌ פורמט לא תקין. השתמש ב: /addgame [קבוצה_א] [קבוצה_ב] [ID]");
-    }
+    const parts = ctx.message.text.split(/\s+/);
+    if (parts.length < 4) return ctx.reply("❌ פורמט: /addgame [קבוצה_א] [קבוצה_ב] [ID]");
     
     const teamA = parts[1];
     const teamB = parts[2];
     const fixtureId = parseInt(parts[3]);
 
     try {
-        // הכנסה לפי השדות המדויקים ב-Supabase שלך
+        // הזנת נתונים ישירות ל-team_a, team_b ו-id שקיימים ב-Supabase שלך
         const { error } = await supabase.from('games').insert([{ 
             team_a: teamA, 
             team_b: teamB, 
-            id: fixtureId // שימוש ב-id כיוון שזו העמודה שקיימת בטבלה
+            id: fixtureId
         }]);
 
         if (error) throw error;
-        
         ctx.reply(`✅ המשחק ${teamA} נגד ${teamB} (ID: ${fixtureId}) נוסף בהצלחה!`);
     } catch (e) { 
         console.error("Supabase Error:", e);
@@ -55,7 +57,7 @@ bot.command('addgame', async (ctx) => {
     }
 });
 
-// טיפול בכפתורים
+// ניהול לחיצות על כפתורים
 bot.on('callback_query', async (ctx) => {
     const data = ctx.callbackQuery.data;
     try {
@@ -72,14 +74,12 @@ bot.on('callback_query', async (ctx) => {
     await ctx.answerCbQuery();
 });
 
-// שרת Keep-Alive ל-Render
+// שרת Keep-Alive שמונע מהבוט ב-Render להירדם
 const app = express();
 app.get('/', (req, res) => res.send('Bot is live'));
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(process.env.PORT || 3000);
 
 bot.launch();
 
-// ניקוי בעת כיבוי
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
