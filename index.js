@@ -102,6 +102,19 @@ bot.command('addgame', async (ctx) => {
     await supabase.from('games').insert([{ home_team: args[1], away_team: args[2], fixture_id: args[3], status: 'active' }]);
     ctx.reply("✅ המשחק נוסף.");
 });
+bot.command('admin', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) {
+        return ctx.reply("❌ אין לך הרשאת אדמין.");
+    }
+
+    const adminMessage = `🛠 **פאנל ניהול אדמין**\n\n` +
+  ` ❌ פורמט שגוי:\n /addgame [קבוצה 1] [קבוצה 2]\n\n` +
+` 💡 כדי לסיים משחק ולעדכן תוצאה:\n /endgame [ID] [תוצאה 1X2]\n\n`
+    await ctx.replyWithMarkdown(adminMessage, Markup.inlineKeyboard([
+        [Markup.button.callback('📊 סטטיסטיקה', 'admin_stats')],
+        [Markup.button.callback('👥 רשימת משתמשים', 'admin_list_users')]
+    ]));
+});
 
 async function checkAndFinishGames() {
     const { data: activeGames } = await supabase.from('games').select('*').eq('status', 'active');
