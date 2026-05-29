@@ -1,14 +1,17 @@
 const { Telegraf, Markup } = require('telegraf');
 const { createClient } = require('@supabase/supabase-js');
+const axios = require('axios'); // ספריה לביצוע קריאות ל-API
 require('dotenv').config();
 
+// התאמה מדויקת לשמות המשתנים שיש לך ב-Render ובמחשב
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
-const botToken = process.env.BOT_TOKEN;
+const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+const botToken = process.env.TELEGRAM_TOKEN || process.env.BOT_TOKEN;
 const adminId = parseInt(process.env.ADMIN_ID) || 0;
+const footballApiKey = process.env.FOOTBALL_API_KEY;
 
 if (!supabaseUrl || !supabaseKey || !botToken) {
-    console.error("❌ חסרים משתני סביבה בקובץ .env");
+    console.error("❌ חסרים משתני סביבה חיוניים להפעלת הבוט!");
     process.exit(1);
 }
 
@@ -96,6 +99,37 @@ bot.command('addgame', async (ctx) => {
     } catch (err) { console.error(err); ctx.reply("❌ שגיאה בהוספת המשחק."); }
 });
 
+// פקודה חדשה ומגניבה: משיכת נתוני משחק חיים מה-API שלכם ישירות לבוט!
+bot.command('checkapi', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return;
+    const args = ctx.message.text.split(' ');
+    const fixtureId = args[1];
+    if (!fixtureId) return ctx.reply("❌ נא לספק Fixture ID. דוגמה: /checkapi 12345");
+
+    if (!footballApiKey) return ctx.reply("❌ מפתח FOOTBALL_API_KEY לא מוגדר במערכת.");
+
+    try {
+        ctx.reply("🔄 בודק נתונים מול שרתי ה-API...");
+        const response = await axios.get(`https://v3.football.api-sports.io/fixtures?id=${fixtureId}`, {
+            headers: { 'x-apisports-key': footballApiKey }
+        });
+
+        const gameData = response.data.response[0];
+        if (!gameData) return ctx.reply("❌ לא נמצאו נתונים עבור ה-ID הזה.");
+
+        const home = gameData.teams.home.name;
+        const away = gameData.teams.away.name;
+        const status = gameData.fixture.status.long;
+        const homeGoals = gameData.goals.home ?? '-';
+        const awayGoals = gameData.goals.away ?? '-';
+
+        ctx.reply(`⚽ *נתוני משחק מה-API:*\n\n🏟️ ${home} נגד ${away}\n📊 סטטוס: ${status}\nתוצאה: ${homeGoals} - ${awayGoals}`, { parse_mode: 'Markdown' });
+    } catch (error) {
+        console.error(error);
+        ctx.reply("❌ שגיאה בתקשורת מול ה-API.");
+    }
+});
+
 bot.command('endgame', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
     const args = ctx.message.text.split(' ');
@@ -130,9 +164,8 @@ bot.on('callback_query', async (ctx) => {
     }
 });
 
-// הפעלה מפורשת שמחזיקה את התהליך פתוח
 bot.launch().then(() => {
-    console.log("🚀 BOT RUNNING WITH CALLBACK HANDLERS");
+    console.log("🚀 BOT RUNNING WITH LIVE API-SPORTS CONFIGURATION");
 }).catch((err) => {
     console.error("❌ הבוט נכשל בעלייה:", err);
 });
