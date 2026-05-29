@@ -53,14 +53,14 @@ async function calculateAndPayout(gameId, actualWinner, actualScore, actualScore
         }
     }
 }
+
+// פקודת /start
 bot.start(async (ctx) => {
-    // רישום המשתמש בדאטה-בייס
     await supabase.from('users').upsert([{ 
         telegram_id: ctx.from.id, 
         username: ctx.from.username 
     }], { onConflict: 'telegram_id' });
 
-    // הטקסט המלא להודעת הפתיחה
     const welcomeText = 
         `🔥 **ברוכים הבאים לבאבאבוט!** 🔥\n\n` +
         `הגעתם לזירת ניחושי הספורט החכמה בישראל.\n` +
@@ -71,7 +71,6 @@ bot.start(async (ctx) => {
         `• כובש ראשון: 20% מהקופה.\n\n` +
         `לחצו על הכפתורים למטה כדי להתחיל:`;
 
-    // שליחת ההודעה עם הכפתורים
     await ctx.reply(welcomeText, { 
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
@@ -81,64 +80,53 @@ bot.start(async (ctx) => {
     });
 });
 
+// ==========================================
+//      האזנה לכפתורי משתמשים (CALLBACKS)
+// ==========================================
 
-bot.command('profit', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    const { data: games } = await supabase.from('games').select('house_profit').eq('status', 'finished');
-    const totalProfit = games.reduce((sum, game) => sum + (game.house_profit || 0), 0);
-    ctx.reply(`📊 סך רווחי הבית שנצברו: ${totalProfit} ש"ח.`);
-});
+// כפתור משחקים פתוחים
+bot.action('list_games', async (ctx) => {
+    try {
+        const { data: games, error } = await supabase.from('games').select('*').eq('status', 'active');
+        
+        if (error || !games || games.length === 0) {
+            await ctx.reply("⚽ אין משחקים פתוחים להימורים כרגע.");
+            return await ctx.answerCbQuery();
+        }
 
-bot.command('bet', async (ctx) => {
-    const args = ctx.message.text.split(' ');
-    if (args.length < 5) return ctx.reply("שימוש: /bet [ID] [מנצחת] [תוצאה] [כובש]");
-    await supabase.from('bets').insert([{ user_id: ctx.from.id, game_id: args[1], winner: args[2], score: args[3], scorer: args[4] }]);
-    ctx.reply("✅ ההימור נרשם!");
-});
+        let message = "📅 **משחקים פתוחים להימורים:**\n\n";
+        games.forEach(game => {
+            message += `🆔 **ID:** ${game.id}\n⚽ ${game.home_team} נגד ${game.away_team}\n📝 להימור שלח: \`/bet ${game.id} [מנצחת] [תוצאה] [כובש]\`\n\n`;
+        });
 
-bot.command('addgame', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return;
-    const args = ctx.message.text.split(' ');
-    await supabase.from('games').insert([{ home_team: args[1], away_team: args[2], fixture_id: args[3], status: 'active' }]);
-    ctx.reply("✅ המשחק נוסף.");
-});
-bot.command('admin', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) {
-        return ctx.reply("❌ אין לך הרשאת אדמין.");
+        await ctx.replyWithMarkdown(message);
+        await ctx.answerCbQuery();
+    } catch (err) {
+        console.error(err);
+        await ctx.answerCbQuery("❌ שגיאה בטעינת המשחקים");
     }
-
-    const adminMessage = `🛠 **פאנל ניהול אדמין**\n\n` +
-  ` ❌ פורמט שגוי:\n /addgame [קבוצה 1] [קבוצה 2]\n\n` +
-` 💡 כדי לסיים משחק ולעדכן תוצאה:\n /endgame [ID] [תוצאה 1X2]\n\n`
-    await ctx.replyWithMarkdown(adminMessage, Markup.inlineKeyboard([
-        [Markup.button.callback('📊 סטטיסטיקה', 'admin_stats')],
-        [Markup.button.callback('👥 רשימת משתמשים', 'admin_list_users')]
-    ]));
 });
 
-async function checkAndFinishGames() {
-    const { data: activeGames } = await supabase.from('games').select('*').eq('status', 'active');
-    if (!activeGames) return;
+// כפתור בדיקת יתרה
+bot.action('check_balance', async (ctx) => {
+    try {
+        const { data: user, error } = await supabase.from('users').select('balance').eq('telegram_id', ctx.from.id).single();
+        
+        if (error || !user) {
+            await ctx.reply("💰 לא נמצאה יתרה במערכת, פנה לסוכן.");
+            return await ctx.answerCbQuery();
+        }
 
-    for (const game of activeGames) {
-        try {
-            const response = await axios.get(`https://v3.football.api-sports.io/fixtures?id=${game.fixture_id}`, {
-                headers: { 'x-apisports-key': FOOTBALL_API_KEY }
-            });
-            const match = response.data.response[0];
-            if (match.fixture.status.short === 'FT') {
-                const home = match.score.fulltime.home, away = match.score.fulltime.away;
-                const winner = home > away ? 'בית' : (away > home ? 'חוץ' : 'תיקו');
-                const scorer = await getFirstScorer(game.fixture_id);
-                
-                await calculateAndPayout(game.id, winner, `${home}-${away}`, scorer);
-                await supabase.from('games').update({ status: 'finished' }).eq('id', game.id);
-            }
-        } catch (err) { console.error(err); }
+        await ctx.reply(`💰 **היתרה הנוכחית שלך:** ${(user.balance || 0).toFixed(2)} ש"ח.`);
+        await ctx.answerCbQuery();
+    } catch (err) {
+        console.error(err);
+        await ctx.answerCbQuery("❌ שגיאה בבדיקת היתרה");
     }
-}
+});
 
-cron.schedule('*/30 * * * *', checkAndFinishGames);
-http.createServer((req, res) => res.end("Bot is running!")).listen(process.env.PORT || 3000);
-bot.launch();
-console.log('🚀 BOT RUNNING');
+// ==========================================
+//      האזנה לכפתורי אדמין (CALLBACKS)
+// ==========================================
+
+bot
