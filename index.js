@@ -125,4 +125,16 @@ bot.on('text', async (ctx) => {
         await supabase.from('games').update({ live_minute: parts[0], live_score: parts[1], live_scorer: parts.slice(2).join(' ') }).eq('id', session.gameId);
         ctx.reply("✅ עודכן!");
         delete userSessions[userId];
-    } else if (session.step === 'ADMIN_A
+    } else if (session.step === 'ADMIN_AWAITING_DEPOSIT') {
+        const amount = parseInt(ctx.message.text);
+        const { data: u } = await supabase.from('users').select('balance').eq('telegram_id', session.targetId).single();
+        await supabase.from('users').update({ balance: u.balance + amount }).eq('telegram_id', session.targetId);
+        ctx.reply("✅ הופקד!");
+        delete userSessions[userId];
+    }
+});
+
+const app = express();
+app.get('/', (req, res) => res.send('Live'));
+app.listen(process.env.PORT || 3000);
+bot.launch();
