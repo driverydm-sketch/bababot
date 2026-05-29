@@ -47,9 +47,8 @@ bot.start(async (ctx) => {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
             [Markup.button.callback("🎮 משחקים פתוחים", 'list_games'), Markup.button.callback("💰 בדיקת יתרה", 'check_balance')],
-            [Markup.button.url("💬 פנייה לסוכן", 'https://t.me/driverydm_sketch')]
-        ])
-    });
+            ("💬// לדוגמה, אם הכפתור מוגדר כחלק מתפריט:
+Markup.button.callback('סוכן זמין Live 24/7 - שלח הודעה עכשיו', 'contact_agent')     });
 });
 
 bot.command('admin', (ctx) => {
