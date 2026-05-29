@@ -89,7 +89,7 @@ bot.start(async (ctx) => {
     }
 });
 
-// פקודת אדמין ייעודית (מופרדת ומאובטחת)
+// פקודת אדמין ייעודית לפתיחת פאנל הניהול
 bot.command('admin', async (ctx) => {
     try {
         if (!isAdmin(ctx.from.id)) {
@@ -105,6 +105,7 @@ bot.command('admin', async (ctx) => {
     }
 });
 
+// פקודת שליחת הימור למשחק משתמש
 bot.command('bet', async (ctx) => {
     try {
         const args = ctx.message.text.split(' ');
@@ -123,6 +124,7 @@ bot.command('bet', async (ctx) => {
     }
 });
 
+// פקודת אדמין להוספת משחק חדש
 bot.command('addgame', async (ctx) => {
     try {
         if (!isAdmin(ctx.from.id)) return ctx.reply("❌ פקודה זו מיועדת למנהלים בלבד.");
@@ -140,6 +142,7 @@ bot.command('addgame', async (ctx) => {
     }
 });
 
+// פקודת אדמין לבדיקת סטטוס משחק מול ה-API החיצוני
 bot.command('checkapi', async (ctx) => {
     try {
         if (!isAdmin(ctx.from.id)) return ctx.reply("❌ פקודה זו מיועדת למנהלים בלבד.");
@@ -169,6 +172,7 @@ bot.command('checkapi', async (ctx) => {
     }
 });
 
+// פקודת אדמין לסגירת משחק ידנית וחלוקת כספים לפי תוצאות
 bot.command('endgame', async (ctx) => {
     try {
         if (!isAdmin(ctx.from.id)) return ctx.reply("❌ פקודה זו מיועדת למנהלים בלבד.");
@@ -184,42 +188,16 @@ bot.command('endgame', async (ctx) => {
     }
 });
 
+// טיפול בלחיצות על כפתורי אינליין (Callback Queries)
 bot.on('callback_query', async (ctx) => {
     try {
-        if (ctx.data === 'list_games') {
+        const data = ctx.data;
+        const userId = ctx.from.id;
+
+        // --- כפתורים רגילים (משתמשים) ---
+        if (data === 'list_games') {
             const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
             if (!games || games.length === 0) {
                 await ctx.reply("⚽ אין משחקים פתוחים להימורים כרגע.");
             } else {
-                let res = "🎮 *משחקים פתוחים להימורים:*\n\n";
-                games.forEach(g => res += `• 🆔 ID: \`${g.id}\` | *${g.home_team}* נגד *${g.away_team}*\n📝 שלח: \`/bet ${g.id} [בית/חוץ/תיקו] [תוצאה] [כובש]\`\n\n`);
-                await ctx.reply(res, { parse_mode: 'Markdown' });
-            }
-        } else if (ctx.data === 'check_balance') {
-            const { data: user } = await supabase.from('users').select('balance').eq('telegram_id', ctx.from.id).single();
-            await ctx.reply(`💰 *היתרה הנוכחית שלך:* **${user?.balance || 0} ש"ח**.`);
-        }
-        await ctx.answerCbQuery().catch(() => {});
-    } catch (err) { 
-        console.error(err); 
-        try { await ctx.answerCbQuery().catch(() => {}); } catch(e) {} 
-    }
-});
-
-// הפעלת הבוט
-bot.launch().then(() => {
-    console.log("🚀 BOT LAUNCHED SUCCESSFULLY");
-}).catch((err) => {
-    console.error("❌ Telegraf launch failed:", err);
-});
-
-// שרת Keep-Alive קבוע ל-Render
-const app = express();
-const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('⚽ BabaBot Web Server is Active and Running!'));
-app.listen(PORT, () => {
-    console.log(`🌍 Express keeping alive server listening on port ${PORT}`);
-});
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+                let res = "🎮 *משחקים פ
