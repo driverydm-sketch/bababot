@@ -66,4 +66,42 @@ bot.on('callback_query', async (ctx) => {
     const userId = ctx.from.id;
     try {
         if (data === 'admin_users') {
-            const { data: usersList } = await supabase.from('users').select('*').limit(1
+            const { data: usersList } = await supabase.from('users').select('*').limit(10);
+            for (const u of usersList) {
+                ctx.reply(`👤 ${u.username} | 💰 ${u.balance} ש"ח`, Markup.inlineKeyboard([[Markup.button.callback(`💵 הפקד ל-${u.username}`, `adm_dep_${u.telegram_id}`)]]));
+            }
+        } else if (data.startsWith('adm_dep_')) {
+            userSessions[userId] = { targetId: parseInt(data.replace('adm_dep_', '')), step: 'ADMIN_AWAITING_DEPOSIT' };
+            ctx.reply("💸 שלח את סכום ההפקדה:");
+        } else if (data === 'admin_broadcast_menu') {
+            ctx.reply("📢 בחר זמן שידור:", Markup.inlineKeyboard([
+                [Markup.button.callback('24 שעות', 'bc_24h'), Markup.button.callback('12 שעות', 'bc_12h')],
+                [Markup.button.callback('3 שעות', 'bc_3h'), Markup.button.callback('שעה', 'bc_1h')],
+                [Markup.button.callback('חצי שעה', 'bc_30m')]
+            ]));
+        } else if (data.startsWith('bc_')) {
+            const time = data.replace('bc_', '').replace('h', ' שעות').replace('m', ' דקות');
+            const message = `⚽ תזכורת: המשחק קרוב! נותרו עוד ${time} לשריקת הפתיחה. אל תחכו לרגע האחרון – שלחו טופס עכשיו! 🏃💨`;
+            const { data: users } = await supabase.from('users').select('telegram_id');
+            for (const u of users) bot.telegram.sendMessage(u.telegram_id, message).catch(() => {});
+            ctx.reply("✅ השידור נשלח לכולם!");
+        } else if (data === 'admin_live_games') {
+            const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
+            ctx.reply("⚽ בחר משחק לעדכון:", Markup.inlineKeyboard(games.map(g => [Markup.button.callback(`${g.team_a} vs ${g.team_b}`, `adm_live_set_${g.id}`)])));
+        } else if (data.startsWith('adm_live_set_')) {
+            userSessions[userId] = { gameId: parseInt(data.replace('adm_live_set_', '')), step: 'ADMIN_AWAITING_LIVE_DATA' };
+            ctx.reply("📝 שלח: [דקה] [תוצאה] [כובש ראשון]");
+        } else if (data === 'list_games') {
+            const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
+            for (const g of games) {
+                ctx.reply(`⚽ *${g.team_a} vs ${g.team_b}*\n⏱️ ${g.live_minute} | 🎯 ${g.live_score}`, {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('🎰 המר (100 ש"ח)', `b1_${g.id}`)],
+                        [Markup.button.callback('📊 מצב קופה לייב', `live_pool_${g.id}`)]
+                    ])
+                });
+            }
+        } else if (data.startsWith('live_pool_')) {
+            const gameId = parseInt(data.replace('live_pool_', ''));
+            const {
