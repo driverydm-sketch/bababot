@@ -1,31 +1,21 @@
-bot.command('addgame', async (ctx) => {
-    // 1. בדיקת הרשאת מנהל
-    if (!isAdmin(ctx.from.id)) return ctx.reply("❌ מורשה למנהלים בלבד.");
-    
-    // 2. פיצול ההודעה לפרמטרים
-    const parts = ctx.message.text.split(' ');
-    
-    // 3. בדיקת תקינות הפורמט
-    if (parts.length < 4) {
-        return ctx.reply("❌ פורמט לא תקין. השתמש ב: /addgame [בית] [חוץ] [ID]");
-    }
-    
-    try {
-        // 4. שליחה ל-Supabase
-        const { error } = await supabase.from('games').insert([{ 
-            home_team: parts[1], 
-            away_team: parts[2], 
-            fixture_id: parseInt(parts[3]), 
-            status: 'active' 
-        }]);
+const { Telegraf, Markup } = require('telegraf');
+const { createClient } = require('@supabase/supabase-js');
+const express = require('express');
 
-        if (error) throw error;
-        
-        // 5. אישור למשתמש
-        ctx.reply(`✅ המשחק ${parts[1]} נגד ${parts[2]} (ID: ${parts[3]}) נוסף בהצלחה!`);
-        
-    } catch (e) {
-        console.error("Error adding game:", e);
-        ctx.reply("❌ שגיאה בשמירת המשחק במסד הנתונים.");
-    }
+const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+
+bot.start((ctx) => {
+    ctx.reply("ברוך הבא לבוט!");
 });
+
+// שרת Keep-Alive ל-Render
+const app = express();
+app.get('/', (req, res) => res.send('Bot is running'));
+app.listen(process.env.PORT || 3000);
+
+bot.launch();
+
+// טיפול בכיבוי תקין
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
