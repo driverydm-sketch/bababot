@@ -12,6 +12,35 @@ app.post('/webhook', (req, res) => {
     res.status(200).send('OK');
 });
 
+// הגדרת הפורט הדינמי - קריטי ל-Render למניעת EADDRINUSE
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Server is running on port ${port}`));
+
+const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
+const app = express();
+
+app.use(express.json());
+
+// הגדרת נתיב ה-Webhook
+app.post('/webhook', (req, res) => {
+    bot.handleUpdate(req.body, res);
+    res.status(200).send('OK');
+});
+
+// הגדרת הפורט הדינמי - קריטי ל-Render למניעת EADDRINUSE
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Server is running on port ${port}`));
+const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
+const app = express();
+
+app.use(express.json());
+
+// הגדרת נתיב ה-Webhook
+app.post('/webhook', (req, res) => {
+    bot.handleUpdate(req.body, res);
+    res.status(200).send('OK');
+});
+
 bot.start((ctx) => ctx.reply("הבוט פעיל ומחובר!"));
 
 // הגדרת הפורט הדינמי - קריטי ל-Render!
