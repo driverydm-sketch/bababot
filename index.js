@@ -129,6 +129,10 @@ const port = process.env.PORT || 3000;
 bot.telegram.setWebhook(`${process.env.URL}/webhook`);
 app.use(bot.webhookCallback('/webhook'));
 
+// החלף את שורת ה-listen שלך בשורה הזו:
+const port = process.env.PORT || 3000;
 app.listen(port, () => {
-    console.log(`Bot is running on port ${port}`);
+    console.log(`Server is running on port ${port}`);
 });
+
+  
