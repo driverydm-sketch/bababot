@@ -10,7 +10,7 @@ const isAdmin = (id) => parseInt(id) === adminId;
 const userSessions = {};
 
 bot.telegram.setMyCommands([
-    { command: 'start', description: '🚀 הפעל בוט' },
+    { command: 'start', description: '🚀 הפעל את הבוט' },
     { command: 'admin', description: '🛠️ פאנל ניהול' }
 ]).catch(console.error);
 
@@ -18,13 +18,38 @@ bot.start(async (ctx) => {
     const userId = ctx.from.id;
     const username = ctx.from.username || ctx.from.first_name || 'שחקן';
     await supabase.from('users').upsert({ telegram_id: userId, username: username }, { onConflict: 'telegram_id' });
-    
-    ctx.reply(`👋 ברוכים הבאים לבאבאבוט! ⚽\n\nלחץ על "משחקים פתוחים" כדי להתחיל להמר.`, 
-        Markup.inlineKeyboard([
+
+    const welcomeText = 
+        `👋 *ברוכים הבאים לבאבאבוט!* ⚽🏆\n\n` +
+        `כאן אנחנו משנים את חוקי המשחק ומנהלים את הימורי הספורט בצורה החברתית, השקופה והמשתלמת ביותר. *לא עוד הימורים מול הבית – מהיום מהמרים אחד נגד השני על קופה משותפת!*\n\n` +
+        `📋 *איך זה עובד? פשוט וקל:*\n` +
+        `1️⃣ *פתיחת ה-Pool:* המשחק עולה למערכת ופתוח מיידית להגשת הימורים.\n` +
+        `2️⃣ *עלות השתתפות:* דמי הכניסה לכל Pool הם *100 ש"ח* קבועים.\n` +
+        `3️⃣ *שליחת הטופס:* בכל משחק תתבקשו לנחש 3 פרמטרים: מנצחת (1,X,2), תוצאה מדויקת ושם כובש ראשון.\n\n` +
+        `🛑 *תנאי סף וביטול משחק:*\n` +
+        `• *מינימום המשתתפים להתחלת המשחק הוא 20 שחקנים.*\n` +
+        `• במידה ועד *15 דקות משריקת הפתיחה* אין 20 משתתפים – המשחק מבוטל אוטומטית והכסף חוזר ישירות ליתרה שלכם בבוט!\n\n` +
+        `💰 *חלוקת הכספים והפרסים:*\n\n` +
+        `🥇 *הפרס המושלם (3 מתוך 3):*\n` +
+        `משתתף שינחש נכונה את *כל 3 הפרמטרים* (מנצחת + תוצאה + כובש) – *לוקח את כל הקופה הביתה!* (אם יש יותר מאחד, הקופה מתחלקת ביניהם).\n\n` +
+        `📊 *חלוקת האחוזים (אם אף אחד לא פגע בטופס מושלם):*\n` +
+        `הכסף בקופה יחולק בין המנחשים לפי אחוזים קבועים:\n` +
+        `• 👑 מי שניחש את *המנצחת* לוקח *40%* מהקופה.\n` +
+        `• 🎯 מי שניחש *תוצאה מדויקת* לוקח *40%* מהקופה.\n` +
+        `• 🏃 מי שניחש את *הכובש הראשון* לוקח *20%* מהקופה.\n\n` +
+        `💳 *הפקדות ומשיכות:*\n` +
+        `• 💵 *להטענת יתרה:* יש לפנות לסוכן הזמין עבורכם 24/7. *מכבדים את כל צורות התשלום:* ביט (Bit), פייבוקס (PayBox), העברה בנקאית, ביטקוין (Bitcoin), קוד משיכה ו-PayPal!\n` +
+        `• 🏧 *משיכת כספים:* חלוקת המשיכות מתבצעת *בכל יום שלישי* באופן מסודר מול הסוכן.\n` +
+        `• ⚡ *משיכה מוקדמת:* ניתן לבצע משיכה מוקדמת בכל יום אחר בשבוע *בניכוי עמלה של 20%*.\n\n` +
+        `🔥 *הקופה כבר חמה! לחצו עכשיו על "🎮 משחקים פתוחים" למטה, תפסו את המקום שלכם ב-Pool ותתחילו לנחש! בהצלחה! 👇*`;
+
+    ctx.reply(welcomeText, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
             [Markup.button.callback("🎮 משחקים פתוחים", 'list_games'), Markup.button.callback("💰 בדיקת יתרה", 'check_balance')],
             [Markup.button.url("💬 פנייה לסוכן", 'https://t.me/driverydm_sketch')]
         ])
-    );
+    });
 });
 
 bot.command('admin', (ctx) => {
@@ -32,55 +57,41 @@ bot.command('admin', (ctx) => {
     ctx.reply("🛠️ פאנל ניהול:", Markup.inlineKeyboard([
         [Markup.button.callback('👥 ניהול משתמשים', 'admin_users')],
         [Markup.button.callback('⚽ עדכון משחק חי', 'admin_live_games')],
-        [Markup.button.callback('📢 מערכת שידורים (Broadcast)', 'admin_broadcast_menu')]
+        [Markup.button.callback('📢 מערכת שידורים', 'admin_broadcast_menu')]
     ]));
 });
 
 bot.on('callback_query', async (ctx) => {
     const data = ctx.callbackQuery.data;
     const userId = ctx.from.id;
-
     try {
-        // --- ניהול משתמשים ---
         if (data === 'admin_users') {
             const { data: usersList } = await supabase.from('users').select('*').limit(10);
             for (const u of usersList) {
                 ctx.reply(`👤 ${u.username} | 💰 ${u.balance} ש"ח`, Markup.inlineKeyboard([[Markup.button.callback(`💵 הפקד ל-${u.username}`, `adm_dep_${u.telegram_id}`)]]));
             }
-        } 
-        else if (data.startsWith('adm_dep_')) {
+        } else if (data.startsWith('adm_dep_')) {
             userSessions[userId] = { targetId: parseInt(data.replace('adm_dep_', '')), step: 'ADMIN_AWAITING_DEPOSIT' };
             ctx.reply("💸 שלח את סכום ההפקדה:");
-        }
-
-        // --- שידורים מהירים (Broadcast) ---
-        else if (data === 'admin_broadcast_menu') {
+        } else if (data === 'admin_broadcast_menu') {
             ctx.reply("📢 בחר זמן שידור:", Markup.inlineKeyboard([
                 [Markup.button.callback('24 שעות', 'bc_24h'), Markup.button.callback('12 שעות', 'bc_12h')],
                 [Markup.button.callback('3 שעות', 'bc_3h'), Markup.button.callback('שעה', 'bc_1h')],
                 [Markup.button.callback('חצי שעה', 'bc_30m')]
             ]));
-        }
-        else if (data.startsWith('bc_')) {
+        } else if (data.startsWith('bc_')) {
             const time = data.replace('bc_', '').replace('h', ' שעות').replace('m', ' דקות');
             const message = `⚽ תזכורת: המשחק קרוב! נותרו עוד ${time} לשריקת הפתיחה. אל תחכו לרגע האחרון – שלחו טופס עכשיו! 🏃💨`;
             const { data: users } = await supabase.from('users').select('telegram_id');
             for (const u of users) bot.telegram.sendMessage(u.telegram_id, message).catch(() => {});
             ctx.reply("✅ השידור נשלח לכולם!");
-        }
-
-        // --- עדכון לייב ---
-        else if (data === 'admin_live_games') {
+        } else if (data === 'admin_live_games') {
             const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
             ctx.reply("⚽ בחר משחק לעדכון:", Markup.inlineKeyboard(games.map(g => [Markup.button.callback(`${g.team_a} vs ${g.team_b}`, `adm_live_set_${g.id}`)])));
-        }
-        else if (data.startsWith('adm_live_set_')) {
+        } else if (data.startsWith('adm_live_set_')) {
             userSessions[userId] = { gameId: parseInt(data.replace('adm_live_set_', '')), step: 'ADMIN_AWAITING_LIVE_DATA' };
             ctx.reply("📝 שלח: [דקה] [תוצאה] [כובש ראשון]");
-        }
-
-        // --- הימורים ---
-        else if (data === 'list_games') {
+        } else if (data === 'list_games') {
             const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
             for (const g of games) {
                 ctx.reply(`⚽ *${g.team_a} vs ${g.team_b}*\n⏱️ ${g.live_minute} | 🎯 ${g.live_score}`, {
@@ -91,19 +102,16 @@ bot.on('callback_query', async (ctx) => {
                     ])
                 });
             }
-        }
-        else if (data.startsWith('live_pool_')) {
+        } else if (data.startsWith('live_pool_')) {
             const gameId = parseInt(data.replace('live_pool_', ''));
             const { data: game } = await supabase.from('games').select('*').eq('id', gameId).single();
             const { data: bets } = await supabase.from('bets').select('*').eq('game_id', gameId);
             const total = (bets.length * 100);
             ctx.reply(`📊 *מצב קופה לייב*\nסך הכל בקופה: ${total} ש"ח\n${game.team_a} vs ${game.team_b}\nדקה: ${game.live_minute}\nתוצאה: ${game.live_score}`, { parse_mode: 'Markdown' });
-        }
-        else if (data.startsWith('b1_')) {
+        } else if (data.startsWith('b1_')) {
             userSessions[userId] = { gameId: parseInt(data.replace('b1_', '')), step: 'AWAITING_WINNER' };
             ctx.reply("👑 מי המנצחת?", Markup.inlineKeyboard([[Markup.button.callback('1', 'b2_1'), Markup.button.callback('X', 'b2_X'), Markup.button.callback('2', 'b2_2')]]));
         }
-
     } catch (e) { console.error(e); }
     await ctx.answerCbQuery();
 });
@@ -112,14 +120,12 @@ bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
     const session = userSessions[userId];
     if (!session) return;
-
     if (session.step === 'ADMIN_AWAITING_LIVE_DATA') {
         const parts = ctx.message.text.split(' ');
         await supabase.from('games').update({ live_minute: parts[0], live_score: parts[1], live_scorer: parts.slice(2).join(' ') }).eq('id', session.gameId);
         ctx.reply("✅ עודכן!");
         delete userSessions[userId];
-    } 
-    else if (session.step === 'ADMIN_AWAITING_DEPOSIT') {
+    } else if (session.step === 'ADMIN_AWAITING_DEPOSIT') {
         const amount = parseInt(ctx.message.text);
         const { data: u } = await supabase.from('users').select('balance').eq('telegram_id', session.targetId).single();
         await supabase.from('users').update({ balance: u.balance + amount }).eq('telegram_id', session.targetId);
