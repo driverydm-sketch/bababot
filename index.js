@@ -7,65 +7,33 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 const adminId = parseInt(process.env.ADMIN_ID);
 
 const isAdmin = (id) => parseInt(id) === adminId;
-
 const userSessions = {};
 
 bot.telegram.setMyCommands([
-    { command: 'start', description: '🚀 הפעל את הבוט ותפריט ראשי' },
-    { command: 'admin', description: '🛠️ פאנל ניהול (לאדמין בלבד)' }
+    { command: 'start', description: '🚀 הפעל בוט' },
+    { command: 'admin', description: '🛠️ פאנל ניהול' }
 ]).catch(console.error);
 
 bot.start(async (ctx) => {
-    delete userSessions[ctx.from.id];
     const userId = ctx.from.id;
     const username = ctx.from.username || ctx.from.first_name || 'שחקן';
-
-    try {
-        const { data: extUser } = await supabase.from('users').select('*').eq('telegram_id', userId).single();
-        if (!extUser) {
-            await supabase.from('users').insert([{ telegram_id: userId, username: username, balance: 0 }]);
-        } else if (extUser.username !== username) {
-            await supabase.from('users').update({ username: username }).eq('telegram_id', userId);
-        }
-    } catch (e) { console.error("Error saving user on start:", e); }
-
-    const welcomeText = 
-        `👋 *ברוכים הבאים לבאבאבוט!* ⚽🏆\n\n` +
-        `כאן אנחנו משנים את חוקי המשחק ומנהלים את הימורי הספורט בצורה החברתית, השקופה והמשתלמת ביותר. *לא עוד הימורים מול הבית – מהיום מהמרים אחד נגד השני על קופה משותפת!*\n\n` +
-        `🔥 *הקופה כבר חמה! לחצו עכשיו על "🎮 משחקים פתוחים" למטה, תפסו את המקום שלכם ב-Pool ותתחילו לנחש! בהצלחה! 👇*`;
-
-    ctx.reply(welcomeText, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
+    await supabase.from('users').upsert({ telegram_id: userId, username: username }, { onConflict: 'telegram_id' });
+    
+    ctx.reply(`👋 ברוכים הבאים לבאבאבוט! ⚽\n\nלחץ על "משחקים פתוחים" כדי להתחיל להמר.`, 
+        Markup.inlineKeyboard([
             [Markup.button.callback("🎮 משחקים פתוחים", 'list_games'), Markup.button.callback("💰 בדיקת יתרה", 'check_balance')],
             [Markup.button.url("💬 פנייה לסוכן", 'https://t.me/driverydm_sketch')]
         ])
-    });
+    );
 });
 
 bot.command('admin', (ctx) => {
     if (!isAdmin(ctx.from.id)) return;
-    ctx.reply("🛠️ פאנל ניהול אדמין:", Markup.inlineKeyboard([
-        [Markup.button.callback('👥 ניהול משתמשים והפקדות', 'admin_users')],
-        [Markup.button.callback('⚽ עדכון משחק חי (לייב)', 'admin_live_games')]
+    ctx.reply("🛠️ פאנל ניהול:", Markup.inlineKeyboard([
+        [Markup.button.callback('👥 ניהול משתמשים', 'admin_users')],
+        [Markup.button.callback('⚽ עדכון משחק חי', 'admin_live_games')],
+        [Markup.button.callback('📢 מערכת שידורים (Broadcast)', 'admin_broadcast_menu')]
     ]));
-});
-
-bot.command('addgame', async (ctx) => {
-    if (!isAdmin(ctx.from.id)) return ctx.reply("❌ Unauthorized.");
-    const parts = ctx.message.text.split(/\s+/);
-    if (parts.length < 4) return ctx.reply("❌ Format: /addgame [TeamA] [TeamB] [ID]");
-    const teamA = parts[1];
-    const teamB = parts[2];
-    const fixtureId = parseInt(parts[3]);
-
-    try {
-        await supabase.from('games').insert([{ 
-            id: fixtureId, team_a: teamA, team_b: teamB, status: 'active',
-            live_score: '0-0', live_scorer: 'אין', live_minute: 'טרם החל'
-        }]);
-        ctx.reply(`✅ Game ${teamA} vs ${teamB} (ID: ${fixtureId}) added!`);
-    } catch (e) { console.error(e); ctx.reply("❌ Database Error."); }
 });
 
 bot.on('callback_query', async (ctx) => {
@@ -73,34 +41,47 @@ bot.on('callback_query', async (ctx) => {
     const userId = ctx.from.id;
 
     try {
+        // --- ניהול משתמשים ---
         if (data === 'admin_users') {
-            if (!isAdmin(userId)) return;
-            const { data: usersList } = await supabase.from('users').select('*').limit(20);
-            if (!usersList || usersList.length === 0) return ctx.reply("לא נמצאו משתמשים.");
-            ctx.reply("👥 בחר משתמש לביצוע הפקדה:");
+            const { data: usersList } = await supabase.from('users').select('*').limit(10);
             for (const u of usersList) {
-                ctx.reply(`👤 ${u.username || 'ללא שם'}\n🆔 \`${u.telegram_id}\`\n💰 ${u.balance} ש"ח`, {
-                    parse_mode: 'Markdown',
-                    ...Markup.inlineKeyboard([[Markup.button.callback(`💵 הפקד ל-${u.username || 'משתמש'}`, `adm_dep_${u.telegram_id}`)]])
-                });
+                ctx.reply(`👤 ${u.username} | 💰 ${u.balance} ש"ח`, Markup.inlineKeyboard([[Markup.button.callback(`💵 הפקד ל-${u.username}`, `adm_dep_${u.telegram_id}`)]]));
             }
-        } else if (data.startsWith('adm_dep_')) {
-            if (!isAdmin(userId)) return;
-            const targetId = parseInt(data.replace('adm_dep_', ''));
-            userSessions[userId] = { targetId: targetId, step: 'ADMIN_AWAITING_DEPOSIT_AMOUNT' };
-            ctx.reply(`💸 הקלד סכום להפקדה (ID: ${targetId}):`);
-        } else if (data === 'admin_live_games') {
-            if (!isAdmin(userId)) return;
-            const { data: activeGames } = await supabase.from('games').select('*').eq('status', 'active');
-            if (!activeGames || activeGames.length === 0) return ctx.reply("אין משחקים.");
-            ctx.reply("⚽ בחר משחק:", Markup.inlineKeyboard(activeGames.map(g => [Markup.button.callback(`${g.team_a} vs ${g.team_b}`, `adm_live_set_${g.id}`)])));
-        } else if (data.startsWith('adm_live_set_')) {
-            if (!isAdmin(userId)) return;
-            userSessions[userId] = { gameId: parseInt(data.replace('adm_live_set_', '')), step: 'ADMIN_AWAITING_LIVE_DATA' };
-            ctx.reply("📝 שלח: [דקה] [תוצאה] [כובש]");
-        } else if (data === 'list_games') {
+        } 
+        else if (data.startsWith('adm_dep_')) {
+            userSessions[userId] = { targetId: parseInt(data.replace('adm_dep_', '')), step: 'ADMIN_AWAITING_DEPOSIT' };
+            ctx.reply("💸 שלח את סכום ההפקדה:");
+        }
+
+        // --- שידורים מהירים (Broadcast) ---
+        else if (data === 'admin_broadcast_menu') {
+            ctx.reply("📢 בחר זמן שידור:", Markup.inlineKeyboard([
+                [Markup.button.callback('24 שעות', 'bc_24h'), Markup.button.callback('12 שעות', 'bc_12h')],
+                [Markup.button.callback('3 שעות', 'bc_3h'), Markup.button.callback('שעה', 'bc_1h')],
+                [Markup.button.callback('חצי שעה', 'bc_30m')]
+            ]));
+        }
+        else if (data.startsWith('bc_')) {
+            const time = data.replace('bc_', '').replace('h', ' שעות').replace('m', ' דקות');
+            const message = `⚽ תזכורת: המשחק קרוב! נותרו עוד ${time} לשריקת הפתיחה. אל תחכו לרגע האחרון – שלחו טופס עכשיו! 🏃💨`;
+            const { data: users } = await supabase.from('users').select('telegram_id');
+            for (const u of users) bot.telegram.sendMessage(u.telegram_id, message).catch(() => {});
+            ctx.reply("✅ השידור נשלח לכולם!");
+        }
+
+        // --- עדכון לייב ---
+        else if (data === 'admin_live_games') {
             const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
-            if (!games || games.length === 0) return ctx.reply("אין משחקים פעילים.");
+            ctx.reply("⚽ בחר משחק לעדכון:", Markup.inlineKeyboard(games.map(g => [Markup.button.callback(`${g.team_a} vs ${g.team_b}`, `adm_live_set_${g.id}`)])));
+        }
+        else if (data.startsWith('adm_live_set_')) {
+            userSessions[userId] = { gameId: parseInt(data.replace('adm_live_set_', '')), step: 'ADMIN_AWAITING_LIVE_DATA' };
+            ctx.reply("📝 שלח: [דקה] [תוצאה] [כובש ראשון]");
+        }
+
+        // --- הימורים ---
+        else if (data === 'list_games') {
+            const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
             for (const g of games) {
                 ctx.reply(`⚽ *${g.team_a} vs ${g.team_b}*\n⏱️ ${g.live_minute} | 🎯 ${g.live_score}`, {
                     parse_mode: 'Markdown',
@@ -110,19 +91,43 @@ bot.on('callback_query', async (ctx) => {
                     ])
                 });
             }
-        } else if (data.startsWith('live_pool_')) {
-            // ... (הלוגיקה נשארת כאן כפי שהייתה)
-            ctx.reply("📊 מצב הקופה יחושב כאן...");
-        } else if (data.startsWith('b1_')) {
+        }
+        else if (data.startsWith('live_pool_')) {
+            const gameId = parseInt(data.replace('live_pool_', ''));
+            const { data: game } = await supabase.from('games').select('*').eq('id', gameId).single();
+            const { data: bets } = await supabase.from('bets').select('*').eq('game_id', gameId);
+            const total = (bets.length * 100);
+            ctx.reply(`📊 *מצב קופה לייב*\nסך הכל בקופה: ${total} ש"ח\n${game.team_a} vs ${game.team_b}\nדקה: ${game.live_minute}\nתוצאה: ${game.live_score}`, { parse_mode: 'Markdown' });
+        }
+        else if (data.startsWith('b1_')) {
             userSessions[userId] = { gameId: parseInt(data.replace('b1_', '')), step: 'AWAITING_WINNER' };
             ctx.reply("👑 מי המנצחת?", Markup.inlineKeyboard([[Markup.button.callback('1', 'b2_1'), Markup.button.callback('X', 'b2_X'), Markup.button.callback('2', 'b2_2')]]));
         }
-        // הוסף כאן את שאר ה-if/else לבחירת שערים וכו'...
+
     } catch (e) { console.error(e); }
     await ctx.answerCbQuery();
 });
 
-// פקודה להרצת השרת
+bot.on('text', async (ctx) => {
+    const userId = ctx.from.id;
+    const session = userSessions[userId];
+    if (!session) return;
+
+    if (session.step === 'ADMIN_AWAITING_LIVE_DATA') {
+        const parts = ctx.message.text.split(' ');
+        await supabase.from('games').update({ live_minute: parts[0], live_score: parts[1], live_scorer: parts.slice(2).join(' ') }).eq('id', session.gameId);
+        ctx.reply("✅ עודכן!");
+        delete userSessions[userId];
+    } 
+    else if (session.step === 'ADMIN_AWAITING_DEPOSIT') {
+        const amount = parseInt(ctx.message.text);
+        const { data: u } = await supabase.from('users').select('balance').eq('telegram_id', session.targetId).single();
+        await supabase.from('users').update({ balance: u.balance + amount }).eq('telegram_id', session.targetId);
+        ctx.reply("✅ הופקד!");
+        delete userSessions[userId];
+    }
+});
+
 const app = express();
 app.get('/', (req, res) => res.send('Live'));
 app.listen(process.env.PORT || 3000);
