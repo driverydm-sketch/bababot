@@ -1,4 +1,24 @@
 const { Telegraf, Markup } = require('telegraf');
+const express = require('express');
+
+const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
+const app = express();
+
+app.use(express.json());
+
+// הגדרת Webhook נכון
+app.post('/webhook', (req, res) => {
+    bot.handleUpdate(req.body, res);
+    res.status(200).send('ok');
+});
+
+bot.start((ctx) => {
+    ctx.reply("👋 שלום! הבוט מחובר ועובד.");
+});
+
+// חשוב מאוד: זה הפורט ש-Render דורש
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Server running on port ${port}`));
 const { createClient } = require('@supabase/supabase-js');
 const express = require('express');
 
