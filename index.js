@@ -51,15 +51,20 @@ ctx.reply(welcomeText, {
         [Markup.button.url("💬 סוכן זמין Live 24/7 - שלח הודעה עכשיו", 'https://t.me/driverydm_sketch')]
     ])
 });
-
-    bot.on('callback_query', async (ctx) => {
+// מבנה תקין ל-callback_query
+bot.on('callback_query', async (ctx) => {
     const data = ctx.callbackQuery.data;
     try {
         if (data === 'list_games') {
-            await ctx.reply("רשימת משחקים...");
-        } 
-        // הקפד שכל if/else if יהיו כאן בצורה מסודרת
-    } catch (e) { console.error(e); }
+            // פעולה
+        } else if (data.startsWith('adm_dep_')) {
+            // פעולה
+        } else if (data === 'admin_users') {
+            // פעולה
+        }
+    } catch (e) {
+        console.error(e);
+    }
     await ctx.answerCbQuery();
 });
             const { data: usersList } = await supabase.from('users').select('*').limit(10);
