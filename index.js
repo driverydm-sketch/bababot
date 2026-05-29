@@ -71,7 +71,6 @@ bot.start(async (ctx) => {
         const userId = ctx.from.id;
         const username = ctx.from.username || ctx.from.first_name || 'משתמש';
         
-        // הגנה מפני קריסה אם ה-Table של המשתמשים לא מגיב זמנית
         try {
             const { data: existingUser } = await supabase.from('users').select('*').eq('telegram_id', userId).single();
             if (!existingUser) { 
@@ -194,10 +193,41 @@ bot.on('callback_query', async (ctx) => {
         const data = ctx.data;
         const userId = ctx.from.id;
 
-        // --- כפתורים רגילים (משתמשים) ---
+        // 1. משחקים פתוחים (משתמש רגיל)
         if (data === 'list_games') {
             const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
             if (!games || games.length === 0) {
                 await ctx.reply("⚽ אין משחקים פתוחים להימורים כרגע.");
             } else {
-                let res = "🎮 *משחקים פ
+                let res = "🎮 *משחקים פתוחים להימורים:*\n\n";
+                games.forEach(g => {
+                    res += `• 🆔 ID: \`${g.id}\` | *${g.home_team}* נגד *${g.away_team}*\n📝 שלח: \`/bet ${g.id} [בית/חוץ/תיקו] [תוצאה] [כובש]\`\n\n`;
+                });
+                await ctx.reply(res, { parse_mode: 'Markdown' });
+            }
+        } 
+        
+        // 2. בדיקת יתרה (משתמש רגיל)
+        else if (data === 'check_balance') {
+            const { data: user } = await supabase.from('users').select('balance').eq('telegram_id', userId).single();
+            await ctx.reply(`💰 *היתרה הנוכחית שלך:* **${user?.balance || 0} ש"ח**.`);
+        }
+
+        // 3. פאנל סטטיסטיקה (מנהל בלבד)
+        else if (data === 'admin_stats') {
+            if (!isAdmin(userId)) {
+                return ctx.answerCbQuery("❌ אין לך הרשאה לכך.", { show_alert: true });
+            }
+
+            const [usersCount, activeGames, totalBets] = await Promise.all([
+                supabase.from('users').select('*', { count: 'exact', head: true }),
+                supabase.from('games').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+                supabase.from('bets').select('*', { count: 'exact', head: true })
+            ]);
+
+            const statsMessage = `📊 *סטטיסטיקת מערכת עכשווית:*\n\n` +
+                                 `👤 *סה"כ משתמשים רשומים:* ${usersCount.count || 0}\n` +
+                                 `⚽ *משחקים פעילים כרגע:* ${activeGames.count || 0}\n` +
+                                 `🎰 *סה"כ הימורים שנשלחו:* ${totalBets.count || 0}`;
+
+            await ctx.reply(statsMessage, {
