@@ -51,7 +51,7 @@ const welcomeText =
 const mainKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback("🎮 משחקים פתוחים", 'list_games'), Markup.button.callback("💰 בדיקת יתרה", 'check_balance')],
     [Markup.button.callback("📋 ההימורים שלי", 'my_bets'), Markup.button.callback("🏆 לוח מובילים", 'leaderboard')],
-    [Markup.button.callback("💸 בקשת משיכה", 'withdraw')],
+    [Markup.button.callback("💸 בקשת משיכה", 'withdraw'), Markup.button.callback("🔗 הפנה חבר", 'get_referral')],
     [Markup.button.url("💬 סוכן זמין 24/7", 'https://t.me/driverydm_sketch')]
 ]);
 
@@ -84,7 +84,8 @@ bot.start(async (ctx) => {
             } catch (e) {}
         }
         // בונוס למצטרף
-        await supabase.from('users').update({ balance: 10 }).eq('telegram_id', userId);
+        const { data: newUserData } = await supabase.from('users').select('balance').eq('telegram_id', userId).single();
+        await supabase.from('users').update({ balance: (newUserData?.balance || 0) + 10, referred_by: referredBy }).eq('telegram_id', userId);
         await ctx.reply(`🎁 *קיבלת 10 ש"ח בונוס הצטרפות!*`, { parse_mode: 'Markdown' });
     }
 
@@ -134,7 +135,16 @@ bot.command('endgame', async (ctx) => {
         return ctx.reply("📝 פורמט: `/endgame [id] [1/X/2] [תוצאה] [כובש]`\nדוגמה: `/endgame 7 1 2-1 מסי`", { parse_mode: 'Markdown' });
     }
     const [, gameId, winner, score, ...scorerParts] = parts;
-    const scorer = scorerParts.join(' ');
+    const scorer = scorerParts.join(' ').trim();
+    if (!scorer) {
+        return ctx.reply("⚠️ חובה לציין שם כובש.\nדוגמה: `/endgame 7 1 2-1 מסי`", { parse_mode: 'Markdown' });
+    }
+    if (!['1', 'X', '2'].includes(winner)) {
+        return ctx.reply("⚠️ מנצחת חייבת להיות 1, X או 2.", { parse_mode: 'Markdown' });
+    }
+    if (!/^\d+-\d+$/.test(score)) {
+        return ctx.reply("⚠️ תוצאה לא תקינה. פורמט: `2-1`", { parse_mode: 'Markdown' });
+    }
     await distributeWinnings(ctx, parseInt(gameId), winner, score, scorer);
 });
 
@@ -296,8 +306,18 @@ async function distributeWinnings(ctx, gameId, winner, score, scorer) {
         );
     }
 
-    // סגירת המשחק
+    // סגירת המשחק + עדכון תוצאות הימורים
     await supabase.from('games').update({ status: 'finished', final_winner: winner, final_score: score, final_scorer: scorer }).eq('id', gameId);
+
+    // סימון תוצאת כל הימור
+    for (const b of bets) {
+        const isPerfect = b.winner === winner && b.score === score && b.scorer === scorer;
+        const wonWinner = b.winner === winner;
+        const wonScore  = b.score === score;
+        const wonScorer = b.scorer === scorer;
+        const result = isPerfect ? 'perfect' : (wonWinner || wonScore || wonScorer) ? 'partial' : 'lost';
+        await supabase.from('bets').update({ result }).eq('id', b.id);
+    }
 }
 
 async function broadcastMessage(ctx, text) {
@@ -534,6 +554,12 @@ bot.on('callback_query', async (ctx) => {
         } else if (data.startsWith('b1_')) {
             const gameId = parseInt(data.replace('b1_', ''));
 
+            const { data: game } = await supabase.from('games').select('status').eq('id', gameId).single();
+            if (!game || game.status !== 'active') {
+                await ctx.reply("❌ ההימורים לא פתוחים עוד למשחק זה.");
+                return ctx.answerCbQuery();
+            }
+
             const { data: existingBet } = await supabase
                 .from('bets').select('id')
                 .eq('telegram_id', userId).eq('game_id', gameId).single();
@@ -766,7 +792,8 @@ cron.schedule('* * * * *', async () => {
     for (const game of upcomingGames || []) {
         const { data: bettors } = await supabase.from('bets').select('telegram_id').eq('game_id', game.id);
         const bettorIds = new Set((bettors || []).map(b => b.telegram_id));
-        const { data: allUsers } = await supabase.from('users').select('telegram_id');
+        // שולחים רק למשתמשים עם יתרה שעדיין לא הימרו
+        const { data: allUsers } = await supabase.from('users').select('telegram_id').gt('balance', 99);
         for (const u of allUsers || []) {
             if (!bettorIds.has(u.telegram_id)) {
                 try {
@@ -804,22 +831,24 @@ cron.schedule('0 9 * * *', async () => {
 // ─── ביטול משחק והחזרת כספים ─────────────────────────────────────────────────
 async function cancelGame(gameId) {
     console.log(`מבצע ביטול למשחק: ${gameId}...`);
+    // שולפים את פרטי המשחק וההימורים לפני הביטול
+    const { data: bets } = await supabase.from('bets').select('telegram_id').eq('game_id', gameId);
+    const { data: game } = await supabase.from('games').select('team_a, team_b').eq('id', gameId).single();
+
     const { error } = await supabase.rpc('cancel_game_and_refund', { target_game_id: gameId });
     if (error) {
         console.error("שגיאה בביטול המשחק:", error);
-    } else {
-        console.log("המשחק בוטל והכספים הוחזרו.");
-        // שליחת הודעה לכל מי שהמר
-        const { data: bets } = await supabase.from('bets').select('telegram_id').eq('game_id', gameId);
-        const { data: game } = await supabase.from('games').select('team_a, team_b').eq('id', gameId).single();
-        for (const b of bets || []) {
-            try {
-                await bot.telegram.sendMessage(b.telegram_id,
-                    `🚫 *המשחק בוטל*\n\n⚽ ${game?.team_a} vs ${game?.team_b}\n\nלא הגיעו 20 משתתפים. *100 ש"ח הוחזרו לחשבונך.*`,
-                    { parse_mode: 'Markdown' }
-                );
-            } catch (e) {}
-        }
+        return; // לא שולחים הודעות אם הביטול נכשל
+    }
+
+    console.log("המשחק בוטל והכספים הוחזרו.");
+    for (const b of bets || []) {
+        try {
+            await bot.telegram.sendMessage(b.telegram_id,
+                `🚫 *המשחק בוטל*\n\n⚽ ${game?.team_a} vs ${game?.team_b}\n\nלא הגיעו 20 משתתפים. *100 ש"ח הוחזרו לחשבונך.*`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (e) {}
     }
 }
 
@@ -832,4 +861,5 @@ app.listen(process.env.PORT || 3000);
 bot.launch();
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
 
