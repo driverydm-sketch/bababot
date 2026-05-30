@@ -88,7 +88,7 @@ bot.on('callback_query', async (ctx) => {
                 );
             }
 
-        } else if (data.startsWith('adm_dep_')) {
+        }  if (data.startsWith('adm_dep_')) {
             if (!isAdmin(userId)) return ctx.answerCbQuery("❌ אין הרשאה");
             userSessions[userId] = {
                 targetId: parseInt(data.replace('adm_dep_', '')),
