@@ -26,6 +26,8 @@ bot.telegram.setMyCommands([
     { command: 'mybets',      description: '📋 ההימורים שלי' },
     { command: 'balance',     description: '💰 יתרה' },
     { command: 'withdraw',    description: '💸 בקשת משיכה' },
+    { command: 'gamestats',   description: '📊 סטטיסטיקות משחק' },
+    { command: 'revenue',     description: '💹 דוח הכנסות' },
 ]).catch(console.error);
 
 // ─── טקסט ברוכים הבאים ───────────────────────────────────────────────────────
@@ -156,6 +158,22 @@ bot.command('broadcast', async (ctx) => {
     await broadcastMessage(ctx, text);
 });
 
+
+// ─── /gamestats ───────────────────────────────────────────────────────────────
+bot.command('gamestats', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply("❌ אין הרשאה.");
+    const parts = ctx.message.text.split(' ');
+    if (parts.length < 2) return ctx.reply("📝 פורמט: /gamestats [id]");
+    const gameId = parseInt(parts[1]);
+    await showGameStats(ctx, gameId);
+});
+
+// ─── /revenue ─────────────────────────────────────────────────────────────────
+bot.command('revenue', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply("❌ אין הרשאה.");
+    await showRevenue(ctx);
+});
+
 // ─── פונקציות עזר ─────────────────────────────────────────────────────────────
 
 async function showAdminPanel(ctx) {
@@ -175,7 +193,8 @@ async function showAdminPanel(ctx) {
                 [Markup.button.callback("👥 רשימת משתמשים", 'admin_users')],
                 [Markup.button.callback("⚽ עדכון משחק לייב", 'admin_live_games')],
                 [Markup.button.callback("💸 בקשות משיכה", 'admin_withdrawals')],
-                [Markup.button.callback("📢 שלח broadcast", 'admin_broadcast')]
+                [Markup.button.callback("📢 שלח broadcast", 'admin_broadcast')],
+                [Markup.button.callback("💹 דוח הכנסות", 'admin_revenue'), Markup.button.callback("🚨 שחקנים חשודים", 'admin_suspicious')]
             ])
         }
     );
@@ -318,6 +337,124 @@ async function distributeWinnings(ctx, gameId, winner, score, scorer) {
         const result = isPerfect ? 'perfect' : (wonWinner || wonScore || wonScorer) ? 'partial' : 'lost';
         await supabase.from('bets').update({ result }).eq('id', b.id);
     }
+
+    // בדיקת שחקנים חשודים אחרי כל משחק
+    checkSuspiciousPlayers().catch(console.error);
+}
+
+
+// ─── showGameStats ────────────────────────────────────────────────────────────
+async function showGameStats(ctx, gameId) {
+    const { data: game } = await supabase.from('games').select('*').eq('id', gameId).single();
+    if (!game) return ctx.reply("❌ משחק לא נמצא.");
+
+    const { data: bets } = await supabase.from('bets').select('*').eq('game_id', gameId);
+    if (!bets || bets.length === 0) return ctx.reply("📊 אין הימורים למשחק זה עדיין.");
+
+    const total = bets.length;
+
+    // מנצחת
+    const count1 = bets.filter(b => b.winner === '1').length;
+    const countX = bets.filter(b => b.winner === 'X').length;
+    const count2 = bets.filter(b => b.winner === '2').length;
+
+    // תוצאות נפוצות
+    const scoreCounts = {};
+    bets.forEach(b => { scoreCounts[b.score] = (scoreCounts[b.score] || 0) + 1; });
+    const topScores = Object.entries(scoreCounts)
+        .sort((a, b) => b[1] - a[1]).slice(0, 5)
+        .map(([s, c]) => `  • ${s} — ${c} (${Math.round(c/total*100)}%)`).join('\n');
+
+    // כובשים נפוצים
+    const scorerCounts = {};
+    bets.forEach(b => { if (b.scorer) scorerCounts[b.scorer] = (scorerCounts[b.scorer] || 0) + 1; });
+    const topScorers = Object.entries(scorerCounts)
+        .sort((a, b) => b[1] - a[1]).slice(0, 5)
+        .map(([s, c]) => `  • ${s} — ${c} (${Math.round(c/total*100)}%)`).join('\n');
+
+    const bar = (n) => {
+        const pct = Math.round(n / total * 10);
+        return '█'.repeat(pct) + '░'.repeat(10 - pct) + ` ${Math.round(n/total*100)}%`;
+    };
+
+    await ctx.reply(
+        `📊 *סטטיסטיקות — ${game.team_a} vs ${game.team_b}*\n` +
+        `💰 קופה: *${total * 100} ש"ח* (${total} הימורים)\n\n` +
+        `👑 *מנצחת:*\n` +
+        `  1 (בית): ${bar(count1)}\n` +
+        `  X (תיקו): ${bar(countX)}\n` +
+        `  2 (חוץ): ${bar(count2)}\n\n` +
+        `🎯 *תוצאות נפוצות:*\n${topScores}\n\n` +
+        `🏃 *כובשים נפוצים:*\n${topScorers}`,
+        { parse_mode: 'Markdown' }
+    );
+}
+
+// ─── showRevenue ──────────────────────────────────────────────────────────────
+async function showRevenue(ctx) {
+    // סה"כ הימורים — כסף שנכנס
+    const { count: totalBets } = await supabase.from('bets').select('*', { count: 'exact', head: true });
+    const totalIn = (totalBets || 0) * 100;
+
+    // סה"כ שנמשך/אושר
+    const { data: approved } = await supabase.from('withdrawal_requests').select('amount').eq('status', 'approved');
+    const totalOut = (approved || []).reduce((s, r) => s + r.amount, 0);
+
+    // ממתינות
+    const { data: pending } = await supabase.from('withdrawal_requests').select('amount').eq('status', 'pending');
+    const totalPending = (pending || []).reduce((s, r) => s + r.amount, 0);
+
+    // משחקים לפי סטטוס
+    const { count: finished } = await supabase.from('games').select('*', { count: 'exact', head: true }).eq('status', 'finished');
+    const { count: active }   = await supabase.from('games').select('*', { count: 'exact', head: true }).eq('status', 'active');
+
+    // יתרות כלל המשתמשים (כסף "תקוע" במערכת)
+    const { data: users } = await supabase.from('users').select('balance');
+    const totalBalances = (users || []).reduce((s, u) => s + (u.balance || 0), 0);
+
+    await ctx.reply(
+        `💹 *דוח הכנסות*\n\n` +
+        `📥 סה"כ כסף שנכנס: *${totalIn} ש"ח*\n` +
+        `📤 סה"כ משיכות שאושרו: *${totalOut} ש"ח*\n` +
+        `⏳ משיכות ממתינות: *${totalPending} ש"ח*\n` +
+        `💰 יתרות שחקנים פעילות: *${totalBalances} ש"ח*\n\n` +
+        `⚽ משחקים שהסתיימו: ${finished || 0}\n` +
+        `🟢 משחקים פתוחים: ${active || 0}\n` +
+        `🎰 סה"כ הימורים: ${totalBets || 0}`,
+        { parse_mode: 'Markdown' }
+    );
+}
+
+// ─── checkSuspiciousPlayers ───────────────────────────────────────────────────
+async function checkSuspiciousPlayers() {
+    // מוצא שחקנים עם 3 טפסים מושלמים ברציפות
+    const { data: perfectBets } = await supabase
+        .from('bets').select('telegram_id, created_at')
+        .eq('result', 'perfect')
+        .order('created_at', { ascending: false });
+
+    if (!perfectBets) return;
+
+    // ספירת רצף מושלם לכל שחקן
+    const streaks = {};
+    for (const b of perfectBets) {
+        streaks[b.telegram_id] = (streaks[b.telegram_id] || 0) + 1;
+    }
+
+    for (const [telegramId, count] of Object.entries(streaks)) {
+        if (count >= 3) {
+            const { data: u } = await supabase.from('users').select('username').eq('telegram_id', parseInt(telegramId)).single();
+            try {
+                await bot.telegram.sendMessage(adminId,
+                    `🚨 *שחקן חשוד!*\n\n` +
+                    `👤 ${u?.username || telegramId}\n` +
+                    `🎯 ${count} טפסים מושלמים ברציפות\n\n` +
+                    `מומלץ לבדוק את פעילותו.`,
+                    { parse_mode: 'Markdown' }
+                );
+            } catch (e) {}
+        }
+    }
 }
 
 async function broadcastMessage(ctx, text) {
@@ -452,6 +589,19 @@ bot.on('callback_query', async (ctx) => {
             if (!isAdmin(userId)) return ctx.answerCbQuery("❌ אין הרשאה");
             userSessions[userId] = { step: 'ADMIN_AWAITING_BROADCAST' };
             await ctx.reply("📢 שלח את ההודעה לשידור לכל המשתמשים:");
+            await ctx.answerCbQuery();
+
+        // ── דוח הכנסות ────────────────────────────────────────────────────────
+        } else if (data === 'admin_revenue') {
+            if (!isAdmin(userId)) return ctx.answerCbQuery("❌ אין הרשאה");
+            await showRevenue(ctx);
+            await ctx.answerCbQuery();
+
+        // ── שחקנים חשודים ─────────────────────────────────────────────────────
+        } else if (data === 'admin_suspicious') {
+            if (!isAdmin(userId)) return ctx.answerCbQuery("❌ אין הרשאה");
+            await checkSuspiciousPlayers();
+            await ctx.reply("🔍 בדיקה הושלמה — ראה התראות למעלה.");
             await ctx.answerCbQuery();
 
         // ── referral link ──────────────────────────────────────────────────────
