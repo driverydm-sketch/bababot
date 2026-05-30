@@ -9,6 +9,7 @@ const adminId = parseInt(process.env.ADMIN_ID);
 
 const isAdmin = (id) => parseInt(id) === adminId;
 const userSessions = {};
+const HOUSE_FEE_PCT = parseFloat(process.env.HOUSE_FEE_PCT || '0.20'); // 20% עמלת מערכת
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 const lastAction = {};
@@ -308,7 +309,17 @@ async function distributeWinnings(ctx, gameId, winner, score, scorer) {
     const { data: bets } = await supabase.from('bets').select('*').eq('game_id', gameId);
     if (!bets || bets.length === 0) return ctx.reply("❌ לא נמצאו הימורים למשחק זה.");
 
-    const total = bets.length * 100;
+    const grossTotal = bets.length * 100;
+    const houseCut   = Math.floor(grossTotal * HOUSE_FEE_PCT);
+    const total      = grossTotal - houseCut; // הקופה לאחר עמלה
+
+    // שמירת עמלה בטבלת house_revenue
+    await supabase.from('house_revenue').insert({
+        game_id:    gameId,
+        gross:      grossTotal,
+        fee_pct:    HOUSE_FEE_PCT,
+        fee_amount: houseCut
+    }).catch(e => console.error('house_revenue insert error:', e));
 
     // בדיקת טופס מושלם
     const perfect = bets.filter(b => b.winner === winner && b.score === score && b.scorer === scorer);
@@ -449,7 +460,19 @@ async function distributeInPlayWinnings(ctx, poolId, winner) {
     const { data: bets } = await supabase.from('inplay_bets').select('*').eq('pool_id', poolId);
     if (!bets || bets.length === 0) return ctx.reply("❌ אין הימורים ב-Pool זה.");
 
-    const total = bets.length * 50;
+    const grossTotal = bets.length * 50;
+    const houseCut   = Math.floor(grossTotal * HOUSE_FEE_PCT);
+    const total      = grossTotal - houseCut;
+
+    // שמירת עמלת In-Play
+    await supabase.from('house_revenue').insert({
+        game_id:    pool.game_id,
+        gross:      grossTotal,
+        fee_pct:    HOUSE_FEE_PCT,
+        fee_amount: houseCut,
+        source:     'inplay'
+    }).catch(e => console.error('house_revenue inplay error:', e));
+
     const winners = bets.filter(b => b.winner === winner);
 
     if (winners.length > 0) {
@@ -541,6 +564,10 @@ async function showRevenue(ctx) {
     const { count: totalBets } = await supabase.from('bets').select('*', { count: 'exact', head: true });
     const totalIn = (totalBets || 0) * 100;
 
+    // עמלות שנגבו
+    const { data: revenues } = await supabase.from('house_revenue').select('fee_amount');
+    const totalFees = (revenues || []).reduce((s, r) => s + (r.fee_amount || 0), 0);
+
     // סה"כ שנמשך/אושר
     const { data: approved } = await supabase.from('withdrawal_requests').select('amount').eq('status', 'approved');
     const totalOut = (approved || []).reduce((s, r) => s + r.amount, 0);
@@ -560,6 +587,7 @@ async function showRevenue(ctx) {
     await ctx.reply(
         `💹 *דוח הכנסות*\n\n` +
         `📥 סה"כ כסף שנכנס: *${totalIn} ש"ח*\n` +
+        `🏦 עמלות מערכת שנגבו: *${totalFees} ש"ח* (${Math.round(HOUSE_FEE_PCT*100)}%)\n` + +
         `📤 סה"כ משיכות שאושרו: *${totalOut} ש"ח*\n` +
         `⏳ משיכות ממתינות: *${totalPending} ש"ח*\n` +
         `💰 יתרות שחקנים פעילות: *${totalBalances} ש"ח*\n\n` +
