@@ -278,14 +278,13 @@ bot.on('text', async (ctx) => {
                 live_scorer: parts.slice(2).join(' ') || null
             }).eq('id', session.gameId);
             await ctx.reply("✅ עודכן בהצלחה!");
-            delete userSessions[userId];
-
-        // אדמין: הפקדה ליוזר
-       else if (session.step === 'ADMIN_AWAITING_DEPOSIT' && isAdmin(userId)) {
-    const amount = parseInt(ctx.message.text);
-    if (isNaN(amount)) return ctx.reply("❌ נא להזין מספר תקין.");
-
-    // 1. עדכון היתרה ב-DB
+            
+           delete userSessions[userId];
+           
+// אדמין: הפקדה ליוזר
+      else if (session.step === 'ADMIN_AWAITING_DEPOSIT' && isAdmin(userId)) {
+            const amount = parseInt(ctx.message.text);
+            if (isNaN(amount)) return ctx.reply("❌ נא להזין מספר תקין.");    // 1. עדכון היתרה ב-DB
     const { data: u } = await supabase.from('users').select('balance').eq('telegram_id', session.targetId).single();
     await supabase.from('users').update({ balance: u.balance + amount }).eq('telegram_id', session.targetId);
     
