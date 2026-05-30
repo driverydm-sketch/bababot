@@ -1,6 +1,7 @@
 const { Telegraf, Markup } = require('telegraf');
 const { createClient } = require('@supabase/supabase-js');
 const express = require('express');
+const cron = require('node-cron');
 
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -68,14 +69,14 @@ bot.command('admin', async (ctx) => {
     });
 });
 
-// ─── callback_query (מאוחד – פעם אחת בלבד) ──────────────────────────────────
+// ─── callback_query (מאוחד) ───────────────────────────────────────────────────
 bot.on('callback_query', async (ctx) => {
     const data = ctx.callbackQuery.data;
     const userId = ctx.from.id;
 
     try {
 
-        // ── אדמין ──────────────────────────────────────────────────────────────
+        // ── אדמין: רשימת משתמשים ──────────────────────────────────────────────
         if (data === 'admin_users') {
             if (!isAdmin(userId)) return ctx.answerCbQuery("❌ אין הרשאה");
             const { data: usersList } = await supabase.from('users').select('*').limit(10);
@@ -88,7 +89,8 @@ bot.on('callback_query', async (ctx) => {
                 );
             }
 
-        }  if (data.startsWith('adm_dep_')) {
+        // ── אדמין: הפקדה ─────────────────────────────────────────────────────
+        } else if (data.startsWith('adm_dep_')) {
             if (!isAdmin(userId)) return ctx.answerCbQuery("❌ אין הרשאה");
             userSessions[userId] = {
                 targetId: parseInt(data.replace('adm_dep_', '')),
@@ -96,6 +98,7 @@ bot.on('callback_query', async (ctx) => {
             };
             await ctx.reply("💸 שלח את סכום ההפקדה:");
 
+        // ── אדמין: רשימת משחקים לעדכון ────────────────────────────────────────
         } else if (data === 'admin_live_games') {
             if (!isAdmin(userId)) return ctx.answerCbQuery("❌ אין הרשאה");
             const { data: games } = await supabase.from('games').select('*').eq('status', 'active');
@@ -103,6 +106,7 @@ bot.on('callback_query', async (ctx) => {
                 games.map(g => [Markup.button.callback(`${g.team_a} vs ${g.team_b}`, `adm_live_set_${g.id}`)])
             ));
 
+        // ── אדמין: בחירת משחק לעדכון ──────────────────────────────────────────
         } else if (data.startsWith('adm_live_set_')) {
             if (!isAdmin(userId)) return ctx.answerCbQuery("❌ אין הרשאה");
             userSessions[userId] = {
@@ -187,7 +191,7 @@ bot.on('callback_query', async (ctx) => {
                 [Markup.button.callback('0', 'b3b_0'), Markup.button.callback('1', 'b3b_1'), Markup.button.callback('2', 'b3b_2')],
                 [Markup.button.callback('3', 'b3b_3'), Markup.button.callback('4', 'b3b_4'), Markup.button.callback('5', 'b3b_5')]
             ]));
-          
+
         // ── שלב 4: שערים קבוצת חוץ → בקשת כובש ──────────────────────────────
         } else if (data.startsWith('b3b_')) {
             if (!userSessions[userId] || userSessions[userId].step !== 'AWAITING_GOALS_B') {
@@ -215,44 +219,36 @@ bot.on('callback_query', async (ctx) => {
     await ctx.answerCbQuery();
 });
 
-const cron = require('node-cron');
-
-// פונקציה שרצה כל דקה
+// ─── cron: ביטול משחק אם אין 20 משתתפים ─────────────────────────────────────
 cron.schedule('* * * * *', async () => {
     const now = new Date();
-    // חישוב זמן של 15 דקות מהעכשיו
     const fifteenMinutesLater = new Date(now.getTime() + 15 * 60000);
 
-    // שליפת משחקים שמתחילים בעוד 15 דקות בדיוק
     const { data: games } = await supabase
         .from('games')
         .select('*')
         .eq('status', 'active')
         .lt('start_time', fifteenMinutesLater.toISOString());
 
+    if (!games) return;
+
     for (const game of games) {
-        // ספירת משתתפים
-        const { count, error } = await supabase
+        const { count } = await supabase
             .from('bets')
             .select('*', { count: 'exact', head: true })
             .eq('game_id', game.id);
 
         if (count < 20) {
-            // ביטול המשחק והחזרת כספים
             await cancelGame(game.id);
         } else {
-            // נעילת המשחק להימורים חדשים
             await supabase.from('games').update({ status: 'locked' }).eq('id', game.id);
         }
     }
 });
- 
+
 async function cancelGame(gameId) {
     console.log(`מבצע ביטול למשחק: ${gameId}...`);
-    
-    // כאן אנחנו קוראים לפונקציה שכתבנו ב-SQL
     const { error } = await supabase.rpc('cancel_game_and_refund', { target_game_id: gameId });
-    
     if (error) {
         console.error("שגיאה בביטול המשחק:", error);
     } else {
@@ -260,7 +256,7 @@ async function cancelGame(gameId) {
     }
 }
 
-// ─── text (מאוחד – פעם אחת בלבד) ────────────────────────────────────────────
+// ─── text (מאוחד) ─────────────────────────────────────────────────────────────
 bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
     const session = userSessions[userId];
@@ -269,7 +265,7 @@ bot.on('text', async (ctx) => {
     try {
 
         // אדמין: עדכון נתוני משחק לייב
-        if (session.step === 'ADMIN_AWAITING_LIVE_DATA') {
+        if (session.step === 'ADMIN_AWAITING_LIVE_DATA' && isAdmin(userId)) {
             const parts = ctx.message.text.split(' ');
             if (parts.length < 2) return ctx.reply("⚠️ פורמט שגוי. שלח: [דקה] [תוצאה] [כובש ראשון]");
             await supabase.from('games').update({
@@ -278,41 +274,37 @@ bot.on('text', async (ctx) => {
                 live_scorer: parts.slice(2).join(' ') || null
             }).eq('id', session.gameId);
             await ctx.reply("✅ עודכן בהצלחה!");
-            
-           delete userSessions[userId];
-           
-// אדמין: הפקדה ליוזר
-      else if (session.step === 'ADMIN_AWAITING_DEPOSIT' && isAdmin(userId)) {
+            delete userSessions[userId];
+
+        // אדמין: הפקדה ליוזר
+        } else if (session.step === 'ADMIN_AWAITING_DEPOSIT' && isAdmin(userId)) {
             const amount = parseInt(ctx.message.text);
-            if (isNaN(amount)) return ctx.reply("❌ נא להזין מספר תקין.");    // 1. עדכון היתרה ב-DB
-    const { data: u } = await supabase.from('users').select('balance').eq('telegram_id', session.targetId).single();
-    await supabase.from('users').update({ balance: u.balance + amount }).eq('telegram_id', session.targetId);
-    
-    // 2. הודעה לאדמין (שהפעולה הצליחה)
-    ctx.reply(`✅ בוצע! הופקדו ${amount} ש"ח ל-${session.targetId}.`);
+            if (isNaN(amount) || amount <= 0) return ctx.reply("❌ נא להזין מספר תקין.");
 
-    // 3. הודעה ישירה למשתמש שקיבל את ההפקדה! ⚡
-    try {
-        await bot.telegram.sendMessage(
-            session.targetId, 
-            `💰 *יש לך הפקדה חדשה!*\n\n` +
-            `הסוכן הפקיד לחשבונך *${amount} ש"ח*.\n` +
-            `יתרתך הנוכחית עודכנה. ניתן כעת להשתמש בבוט ולהמר. בהצלחה! ⚽`, 
-            { parse_mode: 'Markdown' }
-        );
-    } catch (e) {
-        console.error("לא הצלחתי לשלוח הודעה למשתמש (אולי הוא חסם את הבוט):", e);
-    }
+            const { data: u } = await supabase.from('users').select('balance').eq('telegram_id', session.targetId).single();
+            if (!u) return ctx.reply("❌ משתמש לא נמצא.");
+            await supabase.from('users').update({ balance: u.balance + amount }).eq('telegram_id', session.targetId);
 
-    delete userSessions[userId];
-}
+            await ctx.reply(`✅ בוצע! הופקדו ${amount} ש"ח.`);
+
+            // הודעה ישירה למשתמש שקיבל הפקדה
+            try {
+                await bot.telegram.sendMessage(
+                    session.targetId,
+                    `💰 *יש לך הפקדה חדשה!*\n\nהסוכן הפקיד לחשבונך *${amount} ש"ח*.\nיתרתך הנוכחית עודכנה. ניתן כעת להשתמש בבוט ולהמר. בהצלחה! ⚽`,
+                    { parse_mode: 'Markdown' }
+                );
+            } catch (e) {
+                console.error("לא הצלחתי לשלוח הודעה למשתמש (אולי חסם את הבוט):", e);
+            }
+            delete userSessions[userId];
 
         // שחקן: שם כובש + שמירת הימור מלא
         } else if (session.step === 'AWAITING_SCORER') {
             const scorer = ctx.message.text.trim();
             if (!scorer) return ctx.reply("⚠️ שלח שם שחקן תקין.");
 
-            // ניכוי יתרה
+            // בדיקת יתרה וניכוי
             const { data: user } = await supabase.from('users').select('balance').eq('telegram_id', userId).single();
             if (!user || user.balance < 100) {
                 delete userSessions[userId];
