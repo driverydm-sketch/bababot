@@ -652,13 +652,31 @@ async function broadcastMessage(ctx, text) {
 }
 
 // ─── callback_query (מאוחד) ───────────────────────────────────────────────────
-bot.on('callback_query', async (ctx) => {
-    const data = ctx.callbackQuery.data;
-    const userId = ctx.from.id;
+if (data === 'contact_agent') {
+    await ctx.answerCbQuery();
+    
+    // 1. הודעה למשתמש בבוט
+    await ctx.reply("💬 פנייתך נשלחה לסוכן, הוא יצור איתך קשר בהקדם!");
 
-    if (isRateLimited(userId)) return ctx.answerCbQuery("⏳ רגע...");
+    // 2. שליחת התראה אליך (האדמין)
+    // החלף את 'YOUR_ADMIN_ID' ב-ID הטלגרם שלך
+    const ADMIN_ID = '8872067135'; 
+    
+    await bot.telegram.sendMessage(
+        ADMIN_ID, 
+        `🚨 **פנייה חדשה מלקוח!**\n\n` +
+        `שם: ${ctx.from.first_name}\n` +
+        `משתמש: @${ctx.from.username || 'אין'}\n` +
+        `ID: ${ctx.from.id}\n\n` +
+        `הלקוח ביקש עזרה מהסוכן.`
+    );
+}
+    
+    
 
-    try {
+    
+
+    
 
         // ── אדמין ─────────────────────────────────────────────────────────────
         if (data === 'admin_users') {
