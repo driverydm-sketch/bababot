@@ -281,14 +281,32 @@ bot.on('text', async (ctx) => {
             delete userSessions[userId];
 
         // אדמין: הפקדה ליוזר
-        } else if (session.step === 'ADMIN_AWAITING_DEPOSIT') {
-            const amount = parseInt(ctx.message.text);
-            if (isNaN(amount) || amount <= 0) return ctx.reply("⚠️ סכום לא תקין.");
-            const { data: u } = await supabase.from('users').select('balance').eq('telegram_id', session.targetId).single();
-            if (!u) return ctx.reply("❌ משתמש לא נמצא.");
-            await supabase.from('users').update({ balance: u.balance + amount }).eq('telegram_id', session.targetId);
-            await ctx.reply(`✅ הופקד ${amount} ש"ח בהצלחה!`);
-            delete userSessions[userId];
+       else if (session.step === 'ADMIN_AWAITING_DEPOSIT' && isAdmin(userId)) {
+    const amount = parseInt(ctx.message.text);
+    if (isNaN(amount)) return ctx.reply("❌ נא להזין מספר תקין.");
+
+    // 1. עדכון היתרה ב-DB
+    const { data: u } = await supabase.from('users').select('balance').eq('telegram_id', session.targetId).single();
+    await supabase.from('users').update({ balance: u.balance + amount }).eq('telegram_id', session.targetId);
+    
+    // 2. הודעה לאדמין (שהפעולה הצליחה)
+    ctx.reply(`✅ בוצע! הופקדו ${amount} ש"ח ל-${session.targetId}.`);
+
+    // 3. הודעה ישירה למשתמש שקיבל את ההפקדה! ⚡
+    try {
+        await bot.telegram.sendMessage(
+            session.targetId, 
+            `💰 *יש לך הפקדה חדשה!*\n\n` +
+            `הסוכן הפקיד לחשבונך *${amount} ש"ח*.\n` +
+            `יתרתך הנוכחית עודכנה. ניתן כעת להשתמש בבוט ולהמר. בהצלחה! ⚽`, 
+            { parse_mode: 'Markdown' }
+        );
+    } catch (e) {
+        console.error("לא הצלחתי לשלוח הודעה למשתמש (אולי הוא חסם את הבוט):", e);
+    }
+
+    delete userSessions[userId];
+}
 
         // שחקן: שם כובש + שמירת הימור מלא
         } else if (session.step === 'AWAITING_SCORER') {
