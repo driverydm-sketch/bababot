@@ -215,6 +215,20 @@ bot.on('callback_query', async (ctx) => {
     await ctx.answerCbQuery();
 });
 
+ 
+async function cancelGame(gameId) {
+    console.log(`מבצע ביטול למשחק: ${gameId}...`);
+    
+    // כאן אנחנו קוראים לפונקציה שכתבנו ב-SQL
+    const { error } = await supabase.rpc('cancel_game_and_refund', { target_game_id: gameId });
+    
+    if (error) {
+        console.error("שגיאה בביטול המשחק:", error);
+    } else {
+        console.log("המשחק בוטל והכספים הוחזרו בהצלחה.");
+    }
+}
+
 // ─── text (מאוחד – פעם אחת בלבד) ────────────────────────────────────────────
 bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
