@@ -187,7 +187,7 @@ bot.on('callback_query', async (ctx) => {
                 [Markup.button.callback('0', 'b3b_0'), Markup.button.callback('1', 'b3b_1'), Markup.button.callback('2', 'b3b_2')],
                 [Markup.button.callback('3', 'b3b_3'), Markup.button.callback('4', 'b3b_4'), Markup.button.callback('5', 'b3b_5')]
             ]));
-
+          
         // ── שלב 4: שערים קבוצת חוץ → בקשת כובש ──────────────────────────────
         } else if (data.startsWith('b3b_')) {
             if (!userSessions[userId] || userSessions[userId].step !== 'AWAITING_GOALS_B') {
@@ -215,6 +215,37 @@ bot.on('callback_query', async (ctx) => {
     await ctx.answerCbQuery();
 });
 
+const cron = require('node-cron');
+
+// פונקציה שרצה כל דקה
+cron.schedule('* * * * *', async () => {
+    const now = new Date();
+    // חישוב זמן של 15 דקות מהעכשיו
+    const fifteenMinutesLater = new Date(now.getTime() + 15 * 60000);
+
+    // שליפת משחקים שמתחילים בעוד 15 דקות בדיוק
+    const { data: games } = await supabase
+        .from('games')
+        .select('*')
+        .eq('status', 'active')
+        .lt('start_time', fifteenMinutesLater.toISOString());
+
+    for (const game of games) {
+        // ספירת משתתפים
+        const { count, error } = await supabase
+            .from('bets')
+            .select('*', { count: 'exact', head: true })
+            .eq('game_id', game.id);
+
+        if (count < 20) {
+            // ביטול המשחק והחזרת כספים
+            await cancelGame(game.id);
+        } else {
+            // נעילת המשחק להימורים חדשים
+            await supabase.from('games').update({ status: 'locked' }).eq('id', game.id);
+        }
+    }
+});
  
 async function cancelGame(gameId) {
     console.log(`מבצע ביטול למשחק: ${gameId}...`);
