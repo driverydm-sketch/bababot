@@ -1024,31 +1024,29 @@ bot.on('text', async (ctx) => {
         } else if (session.step === 'ADMIN_AWAITING_DEPOSIT' && isAdmin(userId)) {
             const amount = parseInt(ctx.message.text);
             if (isNaN(amount) || amount <= 0) return ctx.reply("❌ מספר לא תקין.");
-            const { data: u } = await supabase.from('users').select('balance, username, first_deposit_done').eq('telegram_id', session.targetId).single();
+            const { data: u } = await supabase.from('users').select('balance, username').eq('telegram_id', session.targetId).single();
             if (!u) return ctx.reply("❌ משתמש לא נמצא.");
 
-            // בונוס הפקדה ראשונה
-            const FIRST_DEPOSIT_BONUS = 50;
-            const FIRST_DEPOSIT_MIN   = 200;
-            const isFirstDeposit = !u.first_deposit_done && amount >= FIRST_DEPOSIT_MIN;
-            const bonus = isFirstDeposit ? FIRST_DEPOSIT_BONUS : 0;
+            // בונוס הפקדה (כל הפקדה מעל הסף)
+            const DEPOSIT_BONUS     = 50;
+            const DEPOSIT_BONUS_MIN = 100;
+            const eligible = amount >= DEPOSIT_BONUS_MIN;
+            const bonus = eligible ? DEPOSIT_BONUS : 0;
             const newBalance = u.balance + amount + bonus;
 
-            const updateData = { balance: newBalance };
-            if (isFirstDeposit) updateData.first_deposit_done = true;
-            await supabase.from('users').update(updateData).eq('telegram_id', session.targetId);
+            await supabase.from('users').update({ balance: newBalance }).eq('telegram_id', session.targetId);
 
             await ctx.reply(
                 `✅ הופקדו *${amount} ש"ח* ל-${u.username}.` +
-                (isFirstDeposit ? `\n🎁 בונוס הפקדה ראשונה: *+${bonus} ש"ח*!` : ''),
+                (eligible ? `\n🎁 בונוס הפקדה: *+${bonus} ש"ח*!` : ''),
                 { parse_mode: 'Markdown' }
             );
             try {
                 await bot.telegram.sendMessage(session.targetId,
                     `💰 *יש לך הפקדה חדשה!*\n\n` +
                     `הסוכן הפקיד *${amount} ש"ח* לחשבונך.\n` +
-                    (isFirstDeposit
-                        ? `🎁 *קיבלת בונוס הפקדה ראשונה של ${bonus} ש"ח!*\n`
+                    (eligible
+                        ? `🎁 *קיבלת בונוס הפקדה של ${bonus} ש"ח!*\n`
                         : '') +
                     `יתרה חדשה: *${newBalance} ש"ח* ⚽`,
                     { parse_mode: 'Markdown' }
@@ -1262,6 +1260,3 @@ app.listen(process.env.PORT || 3000);
 bot.launch();
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
-
-
