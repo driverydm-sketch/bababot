@@ -1271,6 +1271,130 @@ app.use('/admin', express.static(__dirname + '/admin-panel/public'));
 app.get('/admin', (req, res) => res.sendFile(__dirname + '/admin-panel/public/index.html'));
 app.use('/app', express.static(__dirname + '/app/public'));
 app.get('/app', (req, res) => res.sendFile(__dirname + '/app/public/app.html'));
+// middleware לאימות משתמש רגיל
+function checkUserAuth(req, res, next) {
+    const tgId = parseInt(req.headers['x-telegram-id']);
+    if (!tgId) return res.status(401).json({ error: 'לא מחובר' });
+    req.tgId = tgId;
+    next();
+}
+
+// יתרה של משתמש
+app.get('/api/user/balance', checkUserAuth, async (req, res) => {
+    const { data, error } = await supabase
+        .from('users')
+        .select('balance, total_winnings, total_bets')
+        .eq('telegram_id', req.tgId)
+        .single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || { balance: 0, total_winnings: 0, total_bets: 0 });
+});
+
+// רשימת משחקים
+app.get('/api/user/games', checkUserAuth, async (req, res) => {
+    const { data: games, error } = await supabase
+        .from('games')
+        .select('*, bets(id)')
+        .order('id', { ascending: false })
+        .limit(20);
+    if (error) return res.status(500).json({ error: error.message });
+
+    const { data: userBets } = await supabase
+        .from('bets')
+        .select('game_id')
+        .eq('telegram_id', req.tgId);
+    const betGameIds = new Set((userBets || []).map(b => b.game_id));
+    const betCounts = {};
+    (games || []).forEach(g => { betCounts[g.id] = (g.bets || []).length; });
+
+    const result = (games || []).map(g => ({
+        ...g,
+        bets: undefined,
+        bet_count: betCounts[g.id] || 0,
+        user_bet: betGameIds.has(g.id)
+    }));
+    res.json(result);
+});
+
+// שליחת הימור
+app.post('/api/user/bet', checkUserAuth, async (req, res) => {
+    const { game_id, winner, exact_score, first_scorer } = req.body;
+    if (!game_id || !winner || !exact_score || !first_scorer)
+        return res.status(400).json({ error: 'חסרים שדות' });
+
+    const { data: game } = await supabase.from('games').select('status').eq('id', game_id).single();
+    if (!game || game.status !== 'active')
+        return res.status(400).json({ error: 'המשחק לא פעיל או נעול' });
+
+    const { data: existing } = await supabase.from('bets')
+        .select('id').eq('game_id', game_id).eq('telegram_id', req.tgId).single();
+    if (existing) return res.status(400).json({ error: 'כבר הימרת על משחק זה' });
+
+    const { data: user } = await supabase.from('users').select('balance').eq('telegram_id', req.tgId).single();
+    if (!user || user.balance < 100) return res.status(400).json({ error: 'יתרה לא מספיקה' });
+
+    const { error: balErr } = await supabase.from('users')
+        .update({ balance: user.balance - 100 })
+        .eq('telegram_id', req.tgId);
+    if (balErr) return res.status(500).json({ error: balErr.message });
+
+    const { error: betErr } = await supabase.from('bets').insert({
+        telegram_id: req.tgId,
+        game_id,
+        winner,
+        exact_score,
+        first_scorer,
+        amount: 100
+    });
+    if (betErr) return res.status(500).json({ error: betErr.message });
+
+    res.json({ success: true });
+});
+
+// היסטוריית הימורים
+app.get('/api/user/mybets', checkUserAuth, async (req, res) => {
+    const { data, error } = await supabase
+        .from('bets')
+        .select('*, games(team_a, team_b, status, live_score)')
+        .eq('telegram_id', req.tgId)
+        .order('id', { ascending: false })
+        .limit(20);
+    if (error) return res.status(500).json({ error: error.message });
+
+    const result = (data || []).map(b => ({
+        ...b,
+        team_a: b.games?.team_a,
+        team_b: b.games?.team_b,
+        game_status: b.games?.status,
+        games: undefined
+    }));
+    res.json(result);
+});
+
+// לוח מובילים
+app.get('/api/user/leaderboard', checkUserAuth, async (req, res) => {
+    const { data, error } = await supabase
+        .from('users')
+        .select('name, balance, total_winnings, total_bets')
+        .order('balance', { ascending: false })
+        .limit(20);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+});
+
+// בקשת משיכה
+app.post('/api/user/withdraw', checkUserAuth, async (req, res) => {
+    const { data: user } = await supabase.from('users').select('balance, name').eq('telegram_id', req.tgId).single();
+    if (!user || user.balance < 200) return res.status(400).json({ error: 'יתרה מינימלית למשיכה היא ₪200' });
+
+    try {
+        await bot.telegram.sendMessage(adminId,
+            `💸 *בקשת משיכה*\n\nמשתמש: ${user.name || req.tgId}\nID: ${req.tgId}\nיתרה: ₪${user.balance}`,
+            { parse_mode: 'Markdown' }
+        );
+    } catch (e) {}
+    res.json({ success: true });
+});
 
 // בדיקת הרשאת אדמין לכל קריאות ה-API
 function checkAdminAuth(req, res, next) {
