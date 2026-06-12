@@ -56,6 +56,7 @@ const mainKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback("🎮 משחקים פתוחים", 'list_games'), Markup.button.callback("💰 בדיקת יתרה", 'check_balance')],
     [Markup.button.callback("📋 ההימורים שלי", 'my_bets'), Markup.button.callback("🏆 לוח מובילים", 'leaderboard')],
     [Markup.button.callback("💸 בקשת משיכה", 'withdraw'), Markup.button.callback("🔗 הפנה חבר", 'get_referral')],
+    [Markup.button.callback("⚽ בונוס הפקדה 50₪", 'deposit_bonus')],
     [Markup.button.url("💬 סוכן זמין 24/7", 'https://t.me/bababetbot')]
 ]);
 
@@ -237,6 +238,7 @@ async function showAdminPanel(ctx) {
         {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
+                [Markup.button.webApp("🎮 ניהול משחקים (פאנל)", `${process.env.WEBAPP_URL}/admin`)],
                 [Markup.button.callback("👥 רשימת משתמשים", 'admin_users')],
                 [Markup.button.callback("⚽ עדכון משחק לייב", 'admin_live_games')],
                 [Markup.button.callback("💸 בקשות משיכה", 'admin_withdrawals')],
@@ -787,6 +789,17 @@ bot.on('callback_query', async (ctx) => {
             );
             await ctx.answerCbQuery();
 
+        // ── בונוס הפקדה ───────────────────────────────────────────────────────
+        } else if (data === 'deposit_bonus') {
+            await ctx.reply(
+                `⚽💰⚽\n\n` +
+                `🎁 *בונוס הפקדה!*\n\n` +
+                `על כל הפקדה של *₪100* מקבלים בונוס של *₪50*! ⚽\n\n` +
+                `💬 לביצוע הפקדה, פנו לסוכן הזמין שלנו 👇`,
+                { parse_mode: 'Markdown' }
+            );
+            await ctx.answerCbQuery();
+
         // ── ההימורים שלי ──────────────────────────────────────────────────────
         } else if (data === 'my_bets') {
             await showMyBets(ctx, userId);
@@ -1251,12 +1264,93 @@ async function cancelGame(gameId) {
     }
 }
 
-// ─── Express keepalive ────────────────────────────────────────────────────────
+// ─── Express keepalive + פאנל ניהול ─────────────────────────────────────────────
 const app = express();
-app.get('/', (req, res) => res.send('Live'));
+app.use(express.json());
+app.use('/admin', express.static(__dirname + '/admin-panel/public'));
+app.get('/admin', (req, res) => res.sendFile(__dirname + '/admin-panel/public/index.html'));
+
+
+// בדיקת הרשאת אדמין לכל קריאות ה-API
+function checkAdminAuth(req, res, next) {
+    const tgId = parseInt(req.headers['x-telegram-id']);
+    if (!tgId || !isAdmin(tgId)) return res.status(403).json({ error: 'אין הרשאה' });
+    next();
+}
+
+// קבלת רשימת כל המשחקים
+app.get('/api/admin/games', checkAdminAuth, async (req, res) => {
+    const { data, error } = await supabase.from('games').select('*').order('id', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
+
+// יצירת משחק חדש
+app.post('/api/admin/games', checkAdminAuth, async (req, res) => {
+    const { team_a, team_b, start_time } = req.body;
+    if (!team_a || !team_b || !start_time) return res.status(400).json({ error: 'חסרים שדות' });
+    const startTime = new Date(start_time);
+    if (isNaN(startTime.getTime())) return res.status(400).json({ error: 'תאריך לא תקין' });
+
+    const { data, error } = await supabase.from('games').insert({
+        team_a, team_b, start_time: startTime.toISOString(), status: 'active'
+    }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    // התראה לכל המשתמשים
+    const { data: users } = await supabase.from('users').select('telegram_id');
+    for (const u of users || []) {
+        try {
+            await bot.telegram.sendMessage(u.telegram_id,
+                `🔥 *משחק חדש נפתח!*\n\n⚽ *${team_a} vs ${team_b}*\n📅 ${start_time}\n\nלחץ /start להימור!`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 50));
+    }
+
+    res.json(data);
+});
+
+// עדכון לייב (תוצאה / מצב)
+app.patch('/api/admin/games/:id', checkAdminAuth, async (req, res) => {
+    const gameId = parseInt(req.params.id);
+    const { status, live_score } = req.body;
+    const updateData = {};
+    if (status !== undefined) updateData.status = status;
+    if (live_score !== undefined) updateData.live_score = live_score;
+    if (Object.keys(updateData).length === 0) return res.status(400).json({ error: 'אין שדות לעדכון' });
+
+    const { data, error } = await supabase.from('games').update(updateData).eq('id', gameId).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
+
+// מחיקת משחק (ביטול + החזר כספים)
+app.delete('/api/admin/games/:id', checkAdminAuth, async (req, res) => {
+    const gameId = parseInt(req.params.id);
+    const { error } = await supabase.rpc('cancel_game_and_refund', { target_game_id: gameId });
+    if (error) return res.status(500).json({ error: error.message });
+
+    const { data: bets } = await supabase.from('bets').select('telegram_id').eq('game_id', gameId);
+    const { data: game } = await supabase.from('games').select('team_a, team_b').eq('id', gameId).single();
+    for (const b of bets || []) {
+        try {
+            await bot.telegram.sendMessage(b.telegram_id,
+                `🚫 *המשחק בוטל*\n\n⚽ ${game?.team_a} vs ${game?.team_b}\n\nהמשחק נמחק ע"י האדמין. הכסף הוחזר ליתרתך.`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (e) {}
+    }
+    res.json({ success: true });
+});
+
 app.listen(process.env.PORT || 3000);
 
 // ─── הפעלת הבוט ──────────────────────────────────────────────────────────────
 bot.launch();
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+
+

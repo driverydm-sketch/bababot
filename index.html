@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>פאנל ניהול - BababBot</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, Arial, sans-serif; }
+    body {
+        background: var(--tg-theme-bg-color, #0e0e10);
+        color: var(--tg-theme-text-color, #fff);
+        padding: 12px;
+        padding-bottom: 80px;
+    }
+    h1 { font-size: 20px; margin-bottom: 12px; text-align: center; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab {
+        flex: 1; padding: 10px; text-align: center; border-radius: 8px;
+        background: var(--tg-theme-secondary-bg-color, #1c1c1e);
+        cursor: pointer; font-size: 14px; font-weight: 600;
+    }
+    .tab.active { background: var(--tg-theme-button-color, #2ea6ff); color: var(--tg-theme-button-text-color, #fff); }
+    .card {
+        background: var(--tg-theme-secondary-bg-color, #1c1c1e);
+        border-radius: 10px; padding: 12px; margin-bottom: 10px;
+    }
+    .card-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .card-meta { font-size: 13px; opacity: 0.7; margin-bottom: 8px; }
+    .badge {
+        display: inline-block; font-size: 11px; padding: 3px 8px; border-radius: 6px;
+        margin-bottom: 8px; font-weight: 600;
+    }
+    .badge.active { background: #1d9e75; color: #fff; }
+    .badge.locked { background: #BA7517; color: #fff; }
+    .badge.finished { background: #5F5E5A; color: #fff; }
+    .badge.cancelled { background: #A32D2D; color: #fff; }
+    .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    button {
+        border: none; border-radius: 8px; padding: 8px 12px; font-size: 13px;
+        font-weight: 600; cursor: pointer; flex: 1;
+    }
+    .btn-primary { background: var(--tg-theme-button-color, #2ea6ff); color: var(--tg-theme-button-text-color, #fff); }
+    .btn-danger { background: #A32D2D; color: #fff; }
+    .btn-secondary { background: #444441; color: #fff; }
+    input, select {
+        width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 8px;
+        border: 1px solid #444; background: var(--tg-theme-bg-color, #0e0e10);
+        color: var(--tg-theme-text-color, #fff); font-size: 14px;
+    }
+    label { font-size: 13px; opacity: 0.8; display: block; margin-bottom: 4px; }
+    .live-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+    .live-row input { margin-bottom: 0; flex: 1; }
+    .empty { text-align: center; opacity: 0.6; padding: 30px 0; }
+    .toast {
+        position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+        background: #1d9e75; color: #fff; padding: 10px 20px; border-radius: 8px;
+        font-size: 14px; opacity: 0; transition: opacity 0.3s; pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<h1>⚽ פאנל ניהול משחקים</h1>
+
+<div class="tabs">
+    <div class="tab active" data-tab="games">משחקים</div>
+    <div class="tab" data-tab="new">משחק חדש</div>
+</div>
+
+<div id="games-tab"></div>
+
+<div id="new-tab" style="display:none">
+    <div class="card">
+        <label>קבוצה ביתית</label>
+        <input type="text" id="team_a" placeholder="לדוגמה: ברצלונה">
+        <label>קבוצה אורחת</label>
+        <input type="text" id="team_b" placeholder="לדוגמה: ריאל מדריד">
+        <label>תאריך ושעה</label>
+        <input type="datetime-local" id="start_time">
+        <button class="btn-primary" onclick="createGame()">➕ פתח משחק</button>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready();
+tg?.expand();
+
+const userId = tg?.initDataUnsafe?.user?.id || '';
+
+const headers = {
+    'Content-Type': 'application/json',
+    'X-Telegram-Id': userId
+};
+
+function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+function statusLabel(s) {
+    return { active: 'פעיל', locked: 'נעול', finished: 'הסתיים', cancelled: 'בוטל' }[s] || s;
+}
+
+async function loadGames() {
+    const container = document.getElementById('games-tab');
+    container.innerHTML = '<div class="empty">טוען...</div>';
+    try {
+        const res = await fetch('/api/admin/games', { headers });
+        const games = await res.json();
+        if (!Array.isArray(games)) {
+            container.innerHTML = `<div class="empty">${games.error || 'שגיאה'}</div>`;
+            return;
+        }
+        if (games.length === 0) {
+            container.innerHTML = '<div class="empty">אין משחקים</div>';
+            return;
+        }
+        container.innerHTML = games.map(g => `
+            <div class="card">
+                <span class="badge ${g.status}">${statusLabel(g.status)}</span>
+                <div class="card-title">${g.team_a} vs ${g.team_b}</div>
+                <div class="card-meta">🆔 ${g.id} | 📅 ${new Date(g.start_time).toLocaleString('he-IL')}</div>
+                ${g.live_score ? `<div class="card-meta">⚡ תוצאה חיה: ${g.live_score}</div>` : ''}
+
+                <div class="live-row">
+                    <input type="text" placeholder="עדכן תוצאה (לדוגמה 1-0)" id="score-${g.id}" value="${g.live_score || ''}">
+                    <button class="btn-secondary" onclick="updateScore(${g.id})">עדכן</button>
+                </div>
+
+                <div class="row">
+                    ${g.status === 'active' ? `<button class="btn-secondary" onclick="updateStatus(${g.id}, 'locked')">🔒 נעל</button>` : ''}
+                    ${g.status === 'locked' ? `<button class="btn-secondary" onclick="updateStatus(${g.id}, 'active')">🔓 פתח</button>` : ''}
+                    ${g.status !== 'cancelled' && g.status !== 'finished' ? `<button class="btn-danger" onclick="deleteGame(${g.id})">🗑 מחק והחזר כסף</button>` : ''}
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = `<div class="empty">שגיאה בטעינה: ${e.message}</div>`;
+    }
+}
+
+async function updateScore(id) {
+    const live_score = document.getElementById(`score-${id}`).value.trim();
+    const res = await fetch(`/api/admin/games/${id}`, {
+        method: 'PATCH', headers, body: JSON.stringify({ live_score })
+    });
+    if (res.ok) { showToast('✅ עודכן'); loadGames(); }
+    else showToast('❌ שגיאה');
+}
+
+async function updateStatus(id, status) {
+    const res = await fetch(`/api/admin/games/${id}`, {
+        method: 'PATCH', headers, body: JSON.stringify({ status })
+    });
+    if (res.ok) { showToast('✅ הסטטוס עודכן'); loadGames(); }
+    else showToast('❌ שגיאה');
+}
+
+async function deleteGame(id) {
+    if (!confirm('למחוק את המשחק ולהחזיר כסף לכל המשתתפים?')) return;
+    const res = await fetch(`/api/admin/games/${id}`, { method: 'DELETE', headers });
+    if (res.ok) { showToast('✅ המשחק נמחק'); loadGames(); }
+    else showToast('❌ שגיאה');
+}
+
+async function createGame() {
+    const team_a = document.getElementById('team_a').value.trim();
+    const team_b = document.getElementById('team_b').value.trim();
+    const start_time = document.getElementById('start_time').value;
+    if (!team_a || !team_b || !start_time) return showToast('⚠️ מלא את כל השדות');
+
+    const res = await fetch('/api/admin/games', {
+        method: 'POST', headers, body: JSON.stringify({ team_a, team_b, start_time })
+    });
+    if (res.ok) {
+        showToast('✅ המשחק נפתח');
+        document.getElementById('team_a').value = '';
+        document.getElementById('team_b').value = '';
+        document.getElementById('start_time').value = '';
+        document.querySelector('.tab[data-tab="games"]').click();
+    } else {
+        const err = await res.json();
+        showToast('❌ ' + (err.error || 'שגיאה'));
+    }
+}
+
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('games-tab').style.display = tab.dataset.tab === 'games' ? 'block' : 'none';
+        document.getElementById('new-tab').style.display = tab.dataset.tab === 'new' ? 'block' : 'none';
+        if (tab.dataset.tab === 'games') loadGames();
+    });
+});
+
+loadGames();
+</script>
+</body>
+</html>
