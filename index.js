@@ -1269,7 +1269,8 @@ const app = express();
 app.use(express.json());
 app.use('/admin', express.static(__dirname + '/admin-panel/public'));
 app.get('/admin', (req, res) => res.sendFile(__dirname + '/admin-panel/public/index.html'));
-
+app.use('/app', express.static(__dirname + '/app/public'));
+app.get('/app', (req, res) => res.sendFile(__dirname + '/app/public/app.html'));
 
 // בדיקת הרשאת אדמין לכל קריאות ה-API
 function checkAdminAuth(req, res, next) {
