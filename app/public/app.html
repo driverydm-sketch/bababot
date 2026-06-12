@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>BababBot ⚽</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #13131a;
+    --surface2: #1c1c28;
+    --border: #2a2a3a;
+    --accent: #00e676;
+    --accent2: #7c4dff;
+    --red: #ff1744;
+    --gold: #ffd600;
+    --text: #f0f0f8;
+    --muted: #6b6b85;
+    --radius: 14px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, 'Segoe UI', Arial, sans-serif;
+    min-height: 100vh;
+    padding-bottom: 80px;
+    overflow-x: hidden;
+  }
+
+  /* ─── Header ─────────────────────────────── */
+  .header {
+    background: linear-gradient(135deg, #0d0d18 0%, #131326 100%);
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header-logo { font-size: 20px; font-weight: 900; letter-spacing: -0.5px; }
+  .header-logo span { color: var(--accent); }
+  .header-balance {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  /* ─── Bottom Nav ──────────────────────────── */
+  .bottom-nav {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: flex;
+    z-index: 100;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0;
+    cursor: pointer;
+    font-size: 10px;
+    color: var(--muted);
+    gap: 4px;
+    transition: color 0.2s;
+  }
+  .nav-item.active { color: var(--accent); }
+  .nav-icon { font-size: 22px; }
+
+  /* ─── Pages ───────────────────────────────── */
+  .page { display: none; padding: 14px; }
+  .page.active { display: block; }
+
+  /* ─── Section Title ───────────────────────── */
+  .section-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    margin-top: 20px;
+  }
+  .section-title:first-child { margin-top: 0; }
+
+  /* ─── Game Card ───────────────────────────── */
+  .game-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.1s;
+    position: relative;
+    overflow: hidden;
+  }
+  .game-card:active { transform: scale(0.98); }
+  .game-card.has-bet { border-color: var(--accent2); }
+  .game-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .game-card:hover::before, .game-card.has-bet::before { opacity: 1; }
+
+  .game-teams {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .team { text-align: center; flex: 1; }
+  .team-name { font-size: 15px; font-weight: 800; }
+  .vs { color: var(--muted); font-size: 12px; font-weight: 700; padding: 0 10px; }
+  .live-score {
+    background: var(--red);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 900;
+    padding: 4px 12px;
+    border-radius: 6px;
+    letter-spacing: 1px;
+  }
+
+  .game-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .game-pool {
+    color: var(--gold);
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .status-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+  .status-active { background: rgba(0,230,118,0.15); color: var(--accent); }
+  .status-locked { background: rgba(255,214,0,0.15); color: var(--gold); }
+  .status-finished { background: rgba(107,107,133,0.2); color: var(--muted); }
+
+  /* ─── Bet Modal ───────────────────────────── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.8);
+    z-index: 200;
+    display: none;
+    align-items: flex-end;
+    backdrop-filter: blur(4px);
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border-radius: 24px 24px 0 0;
+    padding: 20px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    animation: slideUp 0.3s ease;
+  }
+  @keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  .modal-handle {
+    width: 36px; height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 0 auto 16px;
+  }
+  .modal-title {
+    font-size: 18px;
+    font-weight: 900;
+    margin-bottom: 4px;
+    text-align: center;
+  }
+  .modal-subtitle {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 20px;
+  }
+
+  /* ─── Bet Options ─────────────────────────── */
+  .bet-section-label {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    margin-top: 16px;
+  }
+  .options-row { display: flex; gap: 8px; }
+  .option-btn {
+    flex: 1;
+    background: var(--surface2);
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 8px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .option-btn.selected {
+    border-color: var(--accent);
+    background: rgba(0,230,118,0.1);
+    color: var(--accent);
+  }
+  .score-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 700;
+    text-align: center;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .score-input:focus { border-color: var(--accent); }
+  .score-input::placeholder { color: var(--muted); font-weight: 400; }
+
+  /* ─── Buttons ─────────────────────────────── */
+  .btn {
+    width: 100%;
+    padding: 15px;
+    border-radius: var(--radius);
+    font-size: 16px;
+    font-weight: 800;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    margin-top: 20px;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #00b248);
+    color: #000;
+  }
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn:disabled { opacity: 0.4; pointer-events: none; }
+
+  /* ─── Profile Page ────────────────────────── */
+  .profile-hero {
+    background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    text-align: center;
+    margin-bottom: 14px;
+  }
+  .profile-avatar {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent2), var(--accent));
+    margin: 0 auto 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+  }
+  .profile-name { font-size: 20px; font-weight: 900; margin-bottom: 4px; }
+  .profile-username { font-size: 13px; color: var(--muted); }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+  }
+  .stat-value { font-size: 22px; font-weight: 900; color: var(--accent); }
+  .stat-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* ─── Leaderboard ─────────────────────────── */
+  .leader-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .leader-rank {
+    font-size: 18px;
+    font-weight: 900;
+    width: 32px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .rank-1 { color: var(--gold); }
+  .rank-2 { color: #b0bec5; }
+  .rank-3 { color: #ff8a65; }
+  .leader-info { flex: 1; }
+  .leader-name { font-size: 15px; font-weight: 700; }
+  .leader-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .leader-score { font-size: 16px; font-weight: 900; color: var(--accent); }
+
+  /* ─── Bet History ─────────────────────────── */
+  .bet-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    margin-bottom: 8px;
+  }
+  .bet-game { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+  .bet-details { display: flex; gap: 8px; flex-wrap: wrap; }
+  .bet-tag {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    background: var(--surface2);
+    color: var(--muted);
+  }
+  .bet-tag.win { background: rgba(0,230,118,0.15); color: var(--accent); }
+  .bet-tag.lose { background: rgba(255,23,68,0.15); color: var(--red); }
+  .bet-tag.pending { background: rgba(255,214,0,0.15); color: var(--gold); }
+
+  /* ─── Wallet ──────────────────────────────── */
+  .wallet-card {
+    background: linear-gradient(135deg, #1a0a3a 0%, #0a1a3a 100%);
+    border: 1px solid var(--accent2);
+    border-radius: var(--radius);
+    padding: 24px;
+    text-align: center;
+    margin-bottom: 14px;
+  }
+  .wallet-amount { font-size: 40px; font-weight: 900; color: var(--text); }
+  .wallet-label { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .wallet-currency { font-size: 18px; color: var(--muted); }
+
+  /* ─── Loading / Empty ─────────────────────── */
+  .loading, .empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .empty-icon { font-size: 48px; margin-bottom: 12px; }
+
+  /* ─── Toast ───────────────────────────────── */
+  .toast {
+    position: fixed;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 12px 20px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    opacity: 0;
+    transition: opacity 0.25s;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 300;
+  }
+  .toast.show { opacity: 1; }
+  .toast.success { border-color: var(--accent); color: var(--accent); }
+  .toast.error { border-color: var(--red); color: var(--red); }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-logo">Baba<span>Bot</span> ⚽</div>
+  <div class="header-balance" id="header-balance">₪ --</div>
+</div>
+
+<!-- Pages -->
+
+<!-- HOME PAGE -->
+<div class="page active" id="page-home">
+  <div class="section-title">משחקים פעילים</div>
+  <div id="active-games"><div class="loading">⏳ טוען משחקים...</div></div>
+
+  <div class="section-title">תוצאות אחרונות</div>
+  <div id="recent-games"><div class="loading">⏳ טוען...</div></div>
+</div>
+
+<!-- LEADERBOARD PAGE -->
+<div class="page" id="page-leaderboard">
+  <div class="section-title">טבלת מובילים</div>
+  <div id="leaderboard-list"><div class="loading">⏳ טוען...</div></div>
+</div>
+
+<!-- PROFILE PAGE -->
+<div class="page" id="page-profile">
+  <div id="profile-content"><div class="loading">⏳ טוען...</div></div>
+</div>
+
+<!-- WALLET PAGE -->
+<div class="page" id="page-wallet">
+  <div id="wallet-content"><div class="loading">⏳ טוען...</div></div>
+</div>
+
+<!-- Bottom Nav -->
+<div class="bottom-nav">
+  <div class="nav-item active" data-page="home">
+    <div class="nav-icon">🏠</div>
+    <div>בית</div>
+  </div>
+  <div class="nav-item" data-page="leaderboard">
+    <div class="nav-icon">🏆</div>
+    <div>טבלה</div>
+  </div>
+  <div class="nav-item" data-page="profile">
+    <div class="nav-icon">👤</div>
+    <div>פרופיל</div>
+  </div>
+  <div class="nav-item" data-page="wallet">
+    <div class="nav-icon">💰</div>
+    <div>ארנק</div>
+  </div>
+</div>
+
+<!-- Bet Modal -->
+<div class="modal-overlay" id="bet-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="modal-game-title">PSG vs Arsenal</div>
+    <div class="modal-subtitle">בחר את ניחושיך — עלות: ₪100</div>
+
+    <div class="bet-section-label">מי מנצח?</div>
+    <div class="options-row">
+      <div class="option-btn" data-group="winner" data-val="1" id="win-home">בית</div>
+      <div class="option-btn" data-group="winner" data-val="X" id="win-draw">תיקו</div>
+      <div class="option-btn" data-group="winner" data-val="2" id="win-away">אורח</div>
+    </div>
+
+    <div class="bet-section-label">תוצאה מדויקת</div>
+    <input class="score-input" id="exact-score" type="text" placeholder="לדוגמה: 2-1" maxlength="7">
+
+    <div class="bet-section-label">שם הכובש הראשון</div>
+    <input class="score-input" id="first-scorer" type="text" placeholder="לדוגמה: מבאפה" maxlength="40">
+
+    <button class="btn btn-primary" id="submit-bet-btn" onclick="submitBet()">🎯 שלח הימור — ₪100</button>
+    <button class="btn btn-secondary" onclick="closeBetModal()" style="margin-top:10px">ביטול</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready();
+tg?.expand();
+tg?.setHeaderColor('#0a0a0f');
+
+const userId = tg?.initDataUnsafe?.user?.id || '';
+const userName = tg?.initDataUnsafe?.user?.first_name || 'שחקן';
+const userUsername = tg?.initDataUnsafe?.user?.username || '';
+
+const headers = {
+  'Content-Type': 'application/json',
+  'X-Telegram-Id': String(userId)
+};
+
+let currentGameId = null;
+let betSelection = { winner: null, score: '', scorer: '' };
+let userBalance = 0;
+
+// ─── Toast ────────────────────────────────
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  setTimeout(() => t.className = 'toast', 2500);
+}
+
+// ─── Navigation ───────────────────────────
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    item.classList.add('active');
+    const page = item.dataset.page;
+    document.getElementById('page-' + page).classList.add('active');
+    if (page === 'home') loadHome();
+    if (page === 'leaderboard') loadLeaderboard();
+    if (page === 'profile') loadProfile();
+    if (page === 'wallet') loadWallet();
+  });
+});
+
+// ─── Format date ─────────────────────────
+function formatDate(str) {
+  if (!str) return '';
+  const d = new Date(str);
+  if (isNaN(d)) return str;
+  return d.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function statusBadge(status) {
+  const map = {
+    active: '<span class="status-badge status-active">פעיל</span>',
+    locked: '<span class="status-badge status-locked">🔒 נעול</span>',
+    finished: '<span class="status-badge status-finished">הסתיים</span>',
+    cancelled: '<span class="status-badge status-finished">בוטל</span>',
+  };
+  return map[status] || status;
+}
+
+// ─── Load User Balance ────────────────────
+async function loadBalance() {
+  try {
+    const res = await fetch('/api/user/balance', { headers });
+    if (!res.ok) return;
+    const data = await res.json();
+    userBalance = data.balance || 0;
+    document.getElementById('header-balance').textContent = `₪ ${userBalance.toLocaleString()}`;
+  } catch (e) {}
+}
+
+// ─── Home Page ─────────────────────────────
+async function loadHome() {
+  loadBalance();
+  const activeEl = document.getElementById('active-games');
+  const recentEl = document.getElementById('recent-games');
+
+  try {
+    const res = await fetch('/api/user/games', { headers });
+    const games = await res.json();
+    if (!Array.isArray(games)) throw new Error();
+
+    const active = games.filter(g => g.status === 'active' || g.status === 'locked');
+    const recent = games.filter(g => g.status === 'finished' || g.status === 'cancelled');
+
+    if (active.length === 0) {
+      activeEl.innerHTML = '<div class="empty"><div class="empty-icon">⚽</div>אין משחקים פעילים כרגע</div>';
+    } else {
+      activeEl.innerHTML = active.map(g => `
+        <div class="game-card ${g.user_bet ? 'has-bet' : ''}" onclick="openBetModal(${g.id}, '${g.team_a}', '${g.team_b}', '${g.status}')">
+          <div class="game-teams">
+            <div class="team"><div class="team-name">${g.team_a}</div></div>
+            <div class="vs">
+              ${g.live_score ? `<div class="live-score">${g.live_score}</div>` : 'VS'}
+            </div>
+            <div class="team"><div class="team-name">${g.team_b}</div></div>
+          </div>
+          <div class="game-meta">
+            <div>${formatDate(g.start_time)}</div>
+            ${statusBadge(g.status)}
+            <div class="game-pool">₪${((g.bet_count || 0) * 100).toLocaleString()} קופה</div>
+          </div>
+          ${g.user_bet ? '<div style="font-size:12px;color:var(--accent2);margin-top:8px;">✓ הימרת על משחק זה</div>' : ''}
+        </div>
+      `).join('');
+    }
+
+    if (recent.length === 0) {
+      recentEl.innerHTML = '<div class="empty"><div class="empty-icon">📋</div>אין תוצאות עדיין</div>';
+    } else {
+      recentEl.innerHTML = recent.slice(0, 5).map(g => `
+        <div class="game-card">
+          <div class="game-teams">
+            <div class="team"><div class="team-name">${g.team_a}</div></div>
+            <div class="vs">
+              ${g.live_score ? `<div class="live-score">${g.live_score}</div>` : 'VS'}
+            </div>
+            <div class="team"><div class="team-name">${g.team_b}</div></div>
+          </div>
+          <div class="game-meta">
+            <div>${formatDate(g.start_time)}</div>
+            ${statusBadge(g.status)}
+          </div>
+        </div>
+      `).join('');
+    }
+  } catch (e) {
+    activeEl.innerHTML = '<div class="empty">שגיאה בטעינה</div>';
+  }
+}
+
+// ─── Bet Modal ────────────────────────────
+function openBetModal(id, teamA, teamB, status) {
+  if (status === 'locked' || status === 'finished' || status === 'cancelled') {
+    showToast('ההימורים נעולים למשחק זה', 'error');
+    return;
+  }
+  currentGameId = id;
+  betSelection = { winner: null };
+  document.getElementById('modal-game-title').textContent = `${teamA} vs ${teamB}`;
+  document.getElementById('exact-score').value = '';
+  document.getElementById('first-scorer').value = '';
+  document.querySelectorAll('.option-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('bet-modal').classList.add('open');
+}
+
+function closeBetModal() {
+  document.getElementById('bet-modal').classList.remove('open');
+  currentGameId = null;
+}
+
+document.querySelectorAll('.option-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const group = btn.dataset.group;
+    document.querySelectorAll(`.option-btn[data-group="${group}"]`).forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    betSelection[group] = btn.dataset.val;
+  });
+});
+
+document.getElementById('bet-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeBetModal();
+});
+
+async function submitBet() {
+  const winner = betSelection.winner;
+  const score = document.getElementById('exact-score').value.trim();
+  const scorer = document.getElementById('first-scorer').value.trim();
+
+  if (!winner) return showToast('⚠️ בחר מנצח', 'error');
+  if (!score) return showToast('⚠️ הכנס תוצאה מדויקת', 'error');
+  if (!scorer) return showToast('⚠️ הכנס שם כובש', 'error');
+  if (userBalance < 100) return showToast('❌ יתרה לא מספיקה', 'error');
+
+  const btn = document.getElementById('submit-bet-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ שולח...';
+
+  try {
+    const res = await fetch('/api/user/bet', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ game_id: currentGameId, winner, exact_score: score, first_scorer: scorer })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    showToast('✅ ההימור נשלח!', 'success');
+    closeBetModal();
+    userBalance -= 100;
+    document.getElementById('header-balance').textContent = `₪ ${userBalance.toLocaleString()}`;
+    loadHome();
+  } catch (e) {
+    showToast('❌ ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🎯 שלח הימור — ₪100';
+  }
+}
+
+// ─── Leaderboard ──────────────────────────
+async function loadLeaderboard() {
+  const el = document.getElementById('leaderboard-list');
+  try {
+    const res = await fetch('/api/user/leaderboard', { headers });
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) {
+      el.innerHTML = '<div class="empty"><div class="empty-icon">🏆</div>הטבלה ריקה עדיין</div>';
+      return;
+    }
+    const rankEmoji = ['🥇', '🥈', '🥉'];
+    el.innerHTML = data.map((u, i) => `
+      <div class="leader-item">
+        <div class="leader-rank ${i < 3 ? 'rank-' + (i+1) : ''}">${rankEmoji[i] || (i+1)}</div>
+        <div class="leader-info">
+          <div class="leader-name">${u.name || 'שחקן'}</div>
+          <div class="leader-meta">${u.total_bets || 0} הימורים · ₪${(u.total_winnings || 0).toLocaleString()} זכיות</div>
+        </div>
+        <div class="leader-score">₪${(u.balance || 0).toLocaleString()}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    el.innerHTML = '<div class="empty">שגיאה בטעינה</div>';
+  }
+}
+
+// ─── Profile ──────────────────────────────
+async function loadProfile() {
+  const el = document.getElementById('profile-content');
+  try {
+    const [balRes, betsRes] = await Promise.all([
+      fetch('/api/user/balance', { headers }),
+      fetch('/api/user/mybets', { headers })
+    ]);
+    const { balance, total_winnings, total_bets } = await balRes.json();
+    const bets = await betsRes.json();
+
+    const wins = Array.isArray(bets) ? bets.filter(b => b.won).length : 0;
+    const betsList = Array.isArray(bets) ? bets.slice(0, 10) : [];
+
+    el.innerHTML = `
+      <div class="profile-hero">
+        <div class="profile-avatar">👤</div>
+        <div class="profile-name">${userName}</div>
+        ${userUsername ? `<div class="profile-username">@${userUsername}</div>` : ''}
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value">₪${(balance || 0).toLocaleString()}</div>
+          <div class="stat-label">יתרה</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">₪${(total_winnings || 0).toLocaleString()}</div>
+          <div class="stat-label">סה"כ זכיות</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">${total_bets || 0}</div>
+          <div class="stat-label">הימורים</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">${wins}</div>
+          <div class="stat-label">ניצחונות</div>
+        </div>
+      </div>
+
+      <div class="section-title">היסטוריית הימורים</div>
+      ${betsList.length === 0
+        ? '<div class="empty"><div class="empty-icon">📋</div>אין הימורים עדיין</div>'
+        : betsList.map(b => `
+          <div class="bet-item">
+            <div class="bet-game">${b.team_a || ''} vs ${b.team_b || ''}</div>
+            <div class="bet-details">
+              <span class="bet-tag">מנצח: ${b.winner || '-'}</span>
+              <span class="bet-tag">תוצאה: ${b.exact_score || '-'}</span>
+              <span class="bet-tag">כובש: ${b.first_scorer || '-'}</span>
+              <span class="bet-tag ${b.game_status === 'finished' ? (b.won ? 'win' : 'lose') : 'pending'}">
+                ${b.game_status === 'finished' ? (b.won ? '✓ זכית' : '✗ הפסדת') : '⏳ ממתין'}
+              </span>
+            </div>
+          </div>
+        `).join('')
+      }
+    `;
+  } catch (e) {
+    el.innerHTML = '<div class="empty">שגיאה בטעינה</div>';
+  }
+}
+
+// ─── Wallet ───────────────────────────────
+async function loadWallet() {
+  const el = document.getElementById('wallet-content');
+  try {
+    const res = await fetch('/api/user/balance', { headers });
+    const { balance } = await res.json();
+    el.innerHTML = `
+      <div class="wallet-card">
+        <div class="wallet-currency">₪</div>
+        <div class="wallet-amount">${(balance || 0).toLocaleString()}</div>
+        <div class="wallet-label">יתרה זמינה</div>
+      </div>
+
+      <div class="section-title">הפקדה</div>
+      <div class="game-card">
+        <div style="font-size:14px;color:var(--muted);line-height:1.6;">
+          להפקדת כסף שלח הודעה לבוט עם הפקודה:<br>
+          <strong style="color:var(--text);">/deposit</strong>
+        </div>
+      </div>
+
+      <div class="section-title">משיכה</div>
+      <div class="game-card">
+        <div style="font-size:14px;color:var(--muted);line-height:1.6;margin-bottom:14px;">
+          יתרה מינימלית למשיכה: <strong style="color:var(--text);">₪200</strong>
+        </div>
+        <button class="btn btn-primary" style="margin-top:0" onclick="requestWithdraw()">💸 בקש משיכה</button>
+      </div>
+    `;
+  } catch (e) {
+    el.innerHTML = '<div class="empty">שגיאה בטעינה</div>';
+  }
+}
+
+async function requestWithdraw() {
+  try {
+    const res = await fetch('/api/user/withdraw', { method: 'POST', headers, body: JSON.stringify({}) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    showToast('✅ בקשת משיכה נשלחה', 'success');
+  } catch (e) {
+    showToast('❌ ' + e.message, 'error');
+  }
+}
+
+// ─── Init ─────────────────────────────────
+loadHome();
+</script>
+</body>
+</html>
