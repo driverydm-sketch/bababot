@@ -238,7 +238,7 @@ async function showAdminPanel(ctx) {
         {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
-                [Markup.button.webApp("🎮 ניהול משחקים (פאנל)", `${process.env.WEBAPP_URL}/admin`)],
+                [Markup.button.webApp("🎮 ניהול משחקים (פאנל)", `${process.env.WEBAPP_URL}/app`)],
                 [Markup.button.callback("👥 רשימת משתמשים", 'admin_users')],
                 [Markup.button.callback("⚽ עדכון משחק לייב", 'admin_live_games')],
                 [Markup.button.callback("💸 בקשות משיכה", 'admin_withdrawals')],
